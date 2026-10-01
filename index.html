@@ -445,7 +445,9 @@ function pos(e) { const r = cv.getBoundingClientRect(); return [e.clientX-r.left
 function hitNode(px,py) { for (let i=S.nodes.length-1;i>=0;i--) { const [x,y] = toPx(...S.nodes[i]); if (Math.hypot(x-px,y-py) < 10) return i; } return -1; }
 function hitMember(px,py) { for (let i=0;i<S.members.length;i++) { const [x1,y1]=toPx(...S.nodes[S.members[i][0]]),[x2,y2]=toPx(...S.nodes[S.members[i][1]]); const L2=(x2-x1)**2+(y2-y1)**2; let t=((px-x1)*(x2-x1)+(py-y1)*(y2-y1))/L2; t=Math.max(0,Math.min(1,t)); if (Math.hypot(x1+t*(x2-x1)-px,y1+t*(y2-y1)-py)<6) return i; } return -1; }
 function removeNode(i) { S.nodes.splice(i,1); const fix = n => n>i?n-1:n; S.members = S.members.filter(m=>m[0]!==i&&m[1]!==i).map(m=>[fix(m[0]),fix(m[1])]); S.forces = S.forces.filter(f=>f.n!==i).map(f=>({...f,n:fix(f.n)})); S.supports = S.supports.filter(s=>s.n!==i).map(s=>({...s,n:fix(s.n)})); }
-cv.onmousemove = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py); $('mouseLoc').textContent = '('+fmt(snap(x,S.snapX),2)+', '+fmt(snap(y,S.snapY),2)+')';
+function forceTipAt(px,py) { for (let i=0;i<S.forces.length;i++) { const f = S.forces[i], [nx,ny] = toPx(...S.nodes[f.n]), mag = Math.hypot(f.fx,f.fy)||1, L = Math.max(mag/S.arrowN*S.scale,12); if (Math.hypot(nx+f.fx/mag*L-px, ny-f.fy/mag*L-py) < 14) return i; } return -1; }
+cv.onmousemove = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py);
+  if (!S.drag) cv.style.cursor = (!S.mode && S.tab==='design') ? (hitNode(px,py)>=0 || forceTipAt(px,py)>=0 ? 'grab' : 'default') : 'crosshair'; else if (S.drag.k!=='pan') cv.style.cursor = 'grabbing'; $('mouseLoc').textContent = '('+fmt(snap(x,S.snapX),2)+', '+fmt(snap(y,S.snapY),2)+')';
   if (S.drag) { const d = S.drag;
     if (d.k==='node') { S.nodes[d.i] = [snap(x,S.snapX), snap(y,S.snapY)]; }
     else if (d.k==='force') { const [nx,ny] = S.nodes[S.forces[d.i].n]; S.forces[d.i].fx = +((x-nx)*S.arrowN).toFixed(2); S.forces[d.i].fy = +((y-ny)*S.arrowN).toFixed(2); }
@@ -454,13 +456,14 @@ cv.onmousemove = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py); $('mouse
 cv.onmouseleave = () => { $('mouseLoc').textContent = 'N/A'; };
 cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mode, ni = hitNode(px,py);
   if (m==='pan') { S.drag = {k:'pan',px,py,x0:S.x0,y0:S.y0}; return; }
+  if (!m && S.tab==='design') { const fi = forceTipAt(px,py); if (ni>=0) S.drag = {k:'node',i:ni}; else if (fi>=0) S.drag = {k:'force',i:fi}; return; }
   if (m==='node') { S.nodes.push([snap(x,S.snapX),snap(y,S.snapY)]); fresh(); }
   else if (m==='member') { if (ni<0) return; if (!S.sel) S.sel = {type:'first',n:ni}; else { const a = S.sel.n; S.sel = null; if (a!==ni && !S.members.some(q=>(q[0]===a&&q[1]===ni)||(q[0]===ni&&q[1]===a))) S.members.push([a,ni]); fresh(); } draw(); }
   else if (m==='force') { if (ni>=0) { S.forces.push({n:ni,fx:0,fy:-10}); fresh(); } }
   else if (m==='pin'||m==='hroll'||m==='vroll') { if (ni>=0) { S.supports = S.supports.filter(s=>s.n!==ni); S.supports.push({n:ni,type:m}); fresh(); } }
   else if (m==='single') { if (ni>=0) { removeNode(ni); fresh(); } else { const mi = hitMember(px,py); if (mi>=0) { S.members.splice(mi,1); fresh(); } } }
   else if (m==='mnode') { if (ni>=0) S.drag = {k:'node',i:ni}; }
-  else if (m==='mforce') { S.forces.forEach((f,i) => { const [nx,ny] = toPx(...S.nodes[f.n]); const L = Math.hypot(f.fx,f.fy)/S.arrowN*S.scale; const tx = nx+f.fx/(Math.hypot(f.fx,f.fy)||1)*L, ty = ny-f.fy/(Math.hypot(f.fx,f.fy)||1)*L; if (Math.hypot(tx-px,ty-py)<14) S.drag = {k:'force',i}; }); }
+  else if (m==='mforce') { const fi = forceTipAt(px,py); if (fi>=0) S.drag = {k:'force',i:fi}; }
 };
 window.onmouseup = () => { if (S.drag) { S.drag = null; if (S.mode==='pan') return; render(); } };
 
