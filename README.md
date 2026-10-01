@@ -2,8 +2,7 @@
 
 **Live demo: https://3uripides.github.io/truss-simulator-v2/**
 
-![Screenshot](<img width="1205" height="857" alt="image" src="https://github.com/user-attachments/assets/c9a54c78-b6d2-415c-9858-2212e21300aa" />
-)
+<img width="1205" height="857" alt="Truss Simulator v2 screenshot" src="https://github.com/user-attachments/assets/c9a54c78-b6d2-415c-9858-2212e21300aa" />
 
 A browser-based truss simulator with a **balsa wood strength check** added. It is a personal recreation, built for learning, of the [Truss Simulator from JHU Engineering Innovation](https://ei.jhu.edu/truss-simulator/). It is not affiliated with or endorsed by Johns Hopkins University, and the original is the authoritative tool.
 
