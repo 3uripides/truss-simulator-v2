@@ -42,7 +42,7 @@
   html.dark body { background: #161616; color: #e8e8e8; }
   html.dark table.data td, html.dark #matrix td { border-color: #888; }
   html.dark .Variable { background: transparent; }
-  html.dark #footer div:first-child { color: #6fa0ff; }
+  html.dark #footer div:first-child { color: #6fa0ff !important; }
   html.dark #t_balsa tr[style] td { color: #000; }
   html.dark .good { color: #5fdc5f; } html.dark .bad { color: #ff6b6b; }
 </style>
@@ -149,6 +149,7 @@ function gauss(A0, F0) {
   return x;
 }
 function solve() {
+  commit();
   if (!S.members.length || !S.supports.length) { S.res = null; return; }
   const sys = buildSystem();
   const x = gauss(sys.A, sys.F);
@@ -489,12 +490,39 @@ cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mo
   if (m==='node') { S.nodes.push([snap(x,S.snapX),snap(y,S.snapY)]); fresh(); }
   else if (m==='member') { if (ni<0) return; if (!S.sel) S.sel = {type:'first',n:ni}; else { const a = S.sel.n; S.sel = null; if (a!==ni && !S.members.some(q=>(q[0]===a&&q[1]===ni)||(q[0]===ni&&q[1]===a))) S.members.push([a,ni]); fresh(); } draw(); }
   else if (m==='force') { if (ni>=0) { S.forces.push({n:ni,fx:0,fy:-10}); fresh(); } }
-  else if (m==='pin'||m==='hroll'||m==='vroll') { if (ni>=0) { S.supports = S.supports.filter(s=>s.n!==ni); S.supports.push({n:ni,type:m}); fresh(); } }
+  else if (m==='pin'||m==='hroll'||m==='vroll') {      // on a node: make it a support; on blank space: add a new node there as a support
+    let t = ni; if (t < 0) { S.nodes.push([snap(x,S.snapX), snap(y,S.snapY)]); t = S.nodes.length - 1; }
+    S.supports = S.supports.filter(s=>s.n!==t); S.supports.push({n:t,type:m}); fresh(); }
   else if (m==='single') { if (ni>=0) { removeNode(ni); fresh(); } else { const mi = hitMember(px,py); if (mi>=0) { S.members.splice(mi,1); fresh(); } } }
   else if (m==='mnode') { if (ni>=0) S.drag = {k:'node',i:ni}; }
   else if (m==='mforce') { const fi = forceTipAt(px,py); if (fi>=0) S.drag = {k:'force',i:fi}; }
 };
-window.onmouseup = () => { if (S.drag) { S.drag = null; if (S.mode==='pan') return; render(); } };
+window.onmouseup = () => { if (S.drag) { const wasPan = S.drag.k==='pan'; S.drag = null; if (wasPan) return; commit(); render(); } };
+
+/* undo / redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z) over the design: nodes, members, forces, supports */
+const H = { undo: [], redo: [], cur: null };
+const snapDesign = () => JSON.stringify({n:S.nodes, m:S.members, f:S.forces, s:S.supports});
+function commit() {
+  if (S.drag) return;                       // a drag counts as one step, committed on mouse release
+  const s = snapDesign(); if (s === H.cur) return;
+  if (H.cur !== null) { H.undo.push(H.cur); if (H.undo.length > 200) H.undo.shift(); }
+  H.cur = s; H.redo = [];
+}
+function restore(s) {
+  const d = JSON.parse(s); S.nodes = d.n; S.members = d.m; S.forces = d.f; S.supports = d.s;
+  H.cur = s; S.res = null; S.sel = null; solve(); render();
+}
+function undo() { if (!H.undo.length) return; H.redo.push(H.cur); restore(H.undo.pop()); }
+function redo() { if (!H.redo.length) return; H.undo.push(H.cur); restore(H.redo.pop()); }
+H.cur = snapDesign();
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const t = e.target, typing = t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['checkbox','file','button'].includes(t.type));
+  if (typing) return;                       // let text boxes keep their own undo
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+});
 
 /* dark mode toggle (remembered per browser) */
 function setDark(on) {
