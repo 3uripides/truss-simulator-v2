@@ -310,7 +310,7 @@ function buildMatrix() {
 /* ============ menus ============ */
 const SUBS = {
   design: [['Add','add'],['Delete','delete'],['Move','move'],['Show / Hide','showhide']],
-  io: [['Pre-built truss','pre'],['Save as file','save'],['Load file','load']],
+  io: [['Pre-built truss','pre'],['Download bridge','save'],['Upload bridge','load']],
   solve: [], dims: [['Physical Dimensions','phys'],['Window Size','win'],['Zoom / Pan / Extend','zoom'],['Show / Hide Labels','labels']],
   balsa: [], help: []
 };
@@ -338,8 +338,8 @@ function render() {
   if (S.tab==='solve') infoParts.push('<span class="compress">Compression (red,negative)</span>. <span class="tension">Tension (blue,positive)</span>. <span class="react">Reaction forces (green)</span>.<br>Show matrix at bottom of page: <button class="Submenu" data-matrix>on/off</button>');
   if (S.tab==='io') {
     if (sub2==='pre') infoParts.push('<b>Pre-built Truss:</b> '+[1,2,3,4].map(i=>'<button class="Submenu" data-pre="'+i+'">'+i+'</button>').join(' '));
-    if (sub2==='save') infoParts.push('<b>Save as file:</b> <input type="text" id="fname" placeholder="enter filename..." style="font-family:Arial;font-size:13px"> <button class="Submenu" data-dl>download</button>');
-    if (sub2==='load') infoParts.push('<input type="file" id="fload" accept=".json,.txt">');
+    if (sub2==='save') infoParts.push('<b>Download your bridge to this computer:</b> <input type="text" id="fname" value="my-bridge" style="font-family:Arial;font-size:13px"> .json <button class="Submenu" data-dl>Download</button>');
+    if (sub2==='load') infoParts.push('<b>Upload a bridge file you downloaded earlier (.json):</b> <input type="file" id="fload" accept=".json,application/json"><span id="loadMsg"></span>');
   }
   if (S.tab==='dims') {
     const V = (k,v) => '<button class="Variable" data-var="'+k+'">'+v+'</button>';
@@ -396,7 +396,7 @@ document.addEventListener('click', e => {
   else if (t.dataset.matrix !== undefined) { S.matrix = !S.matrix; render(); }
   else if (t.dataset.pre) { const p = PRE[t.dataset.pre]; const d = p || {nodes:[[-9,0],[9,0],[0,3],[0,0],[-7,3],[-5,0],[-3,3],[-1,0],[1,0],[3,3],[5,0],[7,3]], members:[[0,5],[3,8],[3,7],[5,7],[1,10],[8,10],[9,11],[2,9],[4,6],[2,6],[0,4],[1,11],[10,11],[8,9],[9,10],[2,8],[2,7],[6,7],[5,6],[4,5],[2,3]], forces:[{n:2,fx:0,fy:-10}], supports:[{n:0,type:'pin'},{n:1,type:'hroll'}]};
     S.nodes=JSON.parse(JSON.stringify(d.nodes)); S.members=JSON.parse(JSON.stringify(d.members)); S.forces=JSON.parse(JSON.stringify(d.forces)); S.supports=JSON.parse(JSON.stringify(d.supports)); S.res=null; S.matrix=false; fresh(); }
-  else if (t.dataset.dl !== undefined) { const name = ($('fname').value || 'truss') + '.json'; const blob = new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B})],{type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
+  else if (t.dataset.dl !== undefined) { const name = ($('fname').value.trim().replace(/\.json$/i,'').replace(/[\\/:*?"<>|]/g,'') || 'my-bridge') + '.json'; const blob = new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B})],{type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
   else if (t.dataset.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { S.nodes.push([x,y]); fresh(); } }
   else if (t.dataset.z) zoomCmd(t.dataset.z);
   else if (t.dataset.lab) { S.show[t.dataset.lab] = !S.show[t.dataset.lab]; draw(); }
@@ -420,7 +420,26 @@ function refreshBalsa() { const keep = document.activeElement; const key = keep 
   const tmp = document.createElement('div'); tmp.innerHTML = balsaPanel();
   const out = tmp.querySelector('#balsaOut'), cur = $('balsaOut'); if (out && cur) cur.outerHTML = out.outerHTML;
   const expl = tmp.lastElementChild; buildTables(); draw(); }
-function loadFile(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const d = JSON.parse(r.result); S.nodes=d.nodes; S.members=d.members; S.forces=d.forces; S.supports=d.supports; if (d.balsa) Object.assign(B,d.balsa); fresh(); } catch(err) { alert('Could not read file'); } }; r.readAsText(f); }
+function loadFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const msg = t => { const m = $('loadMsg'); if (m) m.textContent = ' ' + t; };
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result), n = d.nodes.length;
+      const ok = Array.isArray(d.members) && Array.isArray(d.forces) && Array.isArray(d.supports)
+        && d.nodes.every(p => p.length===2 && isFinite(p[0]) && isFinite(p[1]))
+        && d.members.every(m => m[0]>=0 && m[0]<n && m[1]>=0 && m[1]<n)
+        && d.forces.every(q => q.n>=0 && q.n<n) && d.supports.every(s => s.n>=0 && s.n<n && ['pin','hroll','vroll'].includes(s.type));
+      if (!ok) throw 0;
+      S.nodes = d.nodes; S.members = d.members; S.forces = d.forces; S.supports = d.supports;
+      if (d.balsa) Object.assign(B, d.balsa);
+      S.res = null; S.sel = null; solve(); render();
+      msg('Loaded "' + f.name + '".');
+    } catch (err) { msg('Could not read "' + f.name + '" (not a bridge file saved from this simulator).'); }
+  };
+  r.readAsText(f);
+}
 function editVar(btn) {
   const k = btn.dataset.var, inp = document.createElement('input'); inp.className='inputDim';
   const cur = {lu:S.lu,fu:S.fu,W:cv.width/S.scale,H:cv.height/S.scale,snapX:S.snapX,snapY:S.snapY,arrowN:S.arrowN}[k];
