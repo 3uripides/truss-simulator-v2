@@ -570,7 +570,7 @@ const H = { undo: [], redo: [], cur: null };
 const SAVE_KEY = 'truss-autosave-v2';
 const snapDesign = () => JSON.stringify({n:S.nodes, m:S.members, f:S.forces, s:S.supports});
 function autosave() {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({nodes:S.nodes, members:S.members, forces:S.forces, supports:S.supports, balsa:B, colorMode:S.colorMode})); } catch (e) {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({nodes:S.nodes, members:S.members, forces:S.forces, supports:S.supports, balsa:B, colorMode:S.colorMode, dims:dimsObj()})); } catch (e) {}
 }
 function commit() {
   if (S.drag) return;                       // a drag counts as one step, committed on mouse release
@@ -602,6 +602,15 @@ function applyDesign(d) {
   if (d.colorMode === 'tc' || d.colorMode === 'stress') S.colorMode = d.colorMode;
   S.res = null; S.sel = null; S.selN = []; S.selM = -1; S.matrix = false;
 }
+const dimsObj = () => ({lu:S.lu, fu:S.fu, snapX:S.snapX, snapY:S.snapY, arrowN:S.arrowN, scale:S.scale, x0:S.x0, y0:S.y0, w:cv.width, h:cv.height});
+function restoreDims(d) {                     // physical dimensions saved with the autosave
+  if (!d) return;
+  if (typeof d.lu === 'string' && d.lu) S.lu = d.lu;
+  if (typeof d.fu === 'string' && d.fu) S.fu = d.fu;
+  ['snapX','snapY','arrowN','scale'].forEach(k => { if (d[k] > 0) S[k] = d[k]; });
+  ['x0','y0'].forEach(k => { if (isFinite(d[k])) S[k] = d[k]; });
+  if (d.w > 0 && d.h > 0) { cv.width = Math.round(d.w); cv.height = Math.round(d.h); }
+}
 function loadFile(e) {
   const f = e.target.files[0]; if (!f) return;
   const msg = t => { const m = $('loadMsg'); if (m) m.textContent = ' ' + t; };
@@ -609,7 +618,7 @@ function loadFile(e) {
   r.onload = () => {
     try {
       const d = JSON.parse(r.result); if (!validDesign(d)) throw 0;
-      applyDesign(d); solve(); render();
+      applyDesign(d); restoreDims(d.dims); autosave(); solve(); render();
       msg('Loaded "' + f.name + '".');
     } catch (err) { msg('Could not read "' + f.name + '" (not a bridge file saved from this simulator).'); }
   };
@@ -639,7 +648,7 @@ document.addEventListener('click', e => {
   else if (d.anim !== undefined) startAnim();
   else if (d.animstop !== undefined) stopAnim();
   else if (d.pre) { applyDesign(PRE[d.pre]); fresh(); }
-  else if (d.dl !== undefined) download(new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B})],{type:'application/json'}), safeName('fname','json'));
+  else if (d.dl !== undefined) download(new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B,dims:dimsObj()})],{type:'application/json'}), safeName('fname','json'));
   else if (d.png !== undefined) { S.exporting = true; draw(); const name = safeName('pname','png'); cv.toBlob(b => download(b, name)); S.exporting = false; draw(); }
   else if (d.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { S.nodes.push([x,y]); fresh(); } }
   else if (d.z) zoomCmd(d.z);
@@ -664,7 +673,7 @@ document.addEventListener('input', e => {
   else if (d.fx!==undefined) S.forces[d.fx].fx = parseFloat(t.value)||0;
   else if (d.fy!==undefined) S.forces[d.fy].fy = parseFloat(t.value)||0;
   else if (d.b!==undefined) { B[d.b] = t.type==='checkbox' ? t.checked : (parseFloat(t.value)||0); solve(); autosave(); refreshBalsa(); return; }
-  else if (t.id==='winW'||t.id==='winH') { cv.width = parseInt($('winW').value)||607; cv.height = parseInt($('winH').value)||275; draw(); return; }
+  else if (t.id==='winW'||t.id==='winH') { cv.width = parseInt($('winW').value)||607; cv.height = parseInt($('winH').value)||275; autosave(); draw(); return; }
   else return;
   solve(); refreshLive();
 });
@@ -684,7 +693,7 @@ function editVar(btn) {
   const cur = {lu:S.lu,fu:S.fu,W:cv.width/S.scale,H:cv.height/S.scale,snapX:S.snapX,snapY:S.snapY,arrowN:S.arrowN}[k];
   inp.value = typeof cur==='number' ? +cur.toFixed(2) : cur; if (k==='lu'||k==='fu') inp.type='text'; else inp.type='number';
   btn.replaceWith(inp); inp.focus(); inp.select();
-  const done = () => { const v = inp.value; if (k==='lu') S.lu = v||'cm'; else if (k==='fu') S.fu = v||'N'; else { const n = parseFloat(v); if (n>0) { if (k==='W') cv.width = Math.round(n*S.scale); else if (k==='H') cv.height = Math.round(n*S.scale); else S[k]=n; } } solve(); render(); };
+  const done = () => { const v = inp.value; if (k==='lu') S.lu = v||'cm'; else if (k==='fu') S.fu = v||'N'; else { const n = parseFloat(v); if (n>0) { if (k==='W') cv.width = Math.round(n*S.scale); else if (k==='H') cv.height = Math.round(n*S.scale); else S[k]=n; } } solve(); autosave(); render(); };
   inp.onblur = done; inp.onkeydown = ev => { if (ev.key==='Enter') inp.blur(); };
 }
 function zoomCmd(z) {
@@ -695,7 +704,7 @@ function zoomCmd(z) {
   else if (z==='eu') { cv.height += S.scale; S.y0 += 1; } else if (z==='ed') cv.height += S.scale;
   else if (z==='axes') { S.mode = 'pan'; }
   else if (z==='fit' && S.nodes.length) { const xs = S.nodes.map(n=>n[0]), ys = S.nodes.map(n=>n[1]); const x1=Math.min(...xs)-2,x2=Math.max(...xs)+2,y1=Math.min(...ys)-2,y2=Math.max(...ys)+2; S.scale = Math.min(cv.width/(x2-x1), cv.height/(y2-y1)); S.x0 = (x1+x2)/2 - cv.width/S.scale/2; S.y0 = (y1+y2)/2 + cv.height/S.scale/2; }
-  render();
+  autosave(); render();
 }
 
 /* ============ canvas interaction ============ */
@@ -750,7 +759,9 @@ cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mo
     else { const a = S.sel.n; S.sel = null; if (a!==t && findMember(a,t) < 0) S.members.push([a,t]);
       if (S.sym) { const ma = mirrorNodeOrNew(a), mt = mirrorNodeOrNew(t); if (ma!==mt && findMember(ma,mt) < 0) S.members.push([ma,mt]); } }
     fresh(); }
-  else if (m==='force') { const t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); if (S.sym) { const mt = mirrorNodeOrNew(t); if (mt!==t) S.forces.push({n:mt,fx:0,fy:-10}); } fresh(); }
+  else if (m==='force') { const first = !S.forces.length, t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); if (S.sym) { const mt = mirrorNodeOrNew(t); if (mt!==t) S.forces.push({n:mt,fx:0,fy:-10}); }
+    if (first) { S.tab = 'balsa'; sub2 = null; S.mode = null; S.sel = null; }   // first load added: show the Balsa Wood results
+    fresh(); }
   else if (m==='pin'||m==='hroll'||m==='vroll') {                    // on a node: make it a support; on blank space: new node there
     const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
     (S.sym ? [t, mirrorNodeOrNew(t)] : [t]).forEach(n => { S.supports = S.supports.filter(s=>s.n!==n); S.supports.push({n,type:m}); }); fresh(); }
@@ -801,7 +812,7 @@ $('darkToggle').onclick = () => setDark(!document.documentElement.classList.cont
 try { if (localStorage.getItem('truss-dark') === '1') setDark(true); } catch (e) {}
 
 /* ============ start: restore the last autosaved bridge, else blank ============ */
-try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)); if (d && validDesign(d)) applyDesign(d); } catch (e) {}
+try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)); if (d && validDesign(d)) { applyDesign(d); restoreDims(d.dims); } } catch (e) {}
 H.cur = snapDesign();
 solve(); render();
 </script>
