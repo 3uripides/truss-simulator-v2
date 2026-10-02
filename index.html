@@ -173,13 +173,47 @@ function gauss(A0, F0) {
   const x = new Array(n).fill(0); piv.forEach((c,i)=>x[c]=A[i][n]);
   return x;
 }
+// null-space basis of a matrix (rows x cols) -> array of vectors of length cols
+function nullBasis(M0) {
+  const m = M0.length, n = m ? M0[0].length : 0, A = M0.map(r => [...r]), piv = []; let r = 0;
+  for (let c=0; c<n && r<m; c++) {
+    let p = r; for (let i=r+1;i<m;i++) if (Math.abs(A[i][c])>Math.abs(A[p][c])) p=i;
+    if (Math.abs(A[p][c]) < 1e-9) continue;
+    [A[r],A[p]] = [A[p],A[r]];
+    const d = A[r][c]; for (let j=c;j<n;j++) A[r][j]/=d;
+    for (let i=0;i<m;i++) if (i!==r) { const f=A[i][c]; if (f) for (let j=c;j<n;j++) A[i][j]-=f*A[r][j]; }
+    piv.push(c); r++;
+  }
+  const out = [];
+  for (let fc=0; fc<n; fc++) if (!piv.includes(fc)) { const v = new Array(n).fill(0); v[fc] = 1; piv.forEach((c,i) => { v[c] = -A[i][fc]; }); out.push(v); }
+  return out;
+}
+// why can't the truss be solved? mechanisms (unstable) = motions the supports and members do not resist,
+// redundants (indeterminate) = members that carry load in more than one way.
+function diagnose(sys) {
+  const A = sys.A, cols = sys.cols, n2 = A.length, eps = 1e-6;
+  const At = Array.from({length:cols}, (_,c) => A.map(row => row[c]));
+  const mech = nullBasis(At), red = nullBasis(A);
+  const badM = new Set(), badN = new Set(), redM = new Set();
+  mech.forEach(u => {
+    for (let r=0; r<n2; r++) if (Math.abs(u[r]) > eps) badN.add(r>>1);
+    S.members.forEach((m,i) => {
+      const [a,b] = m, dx = S.nodes[b][0]-S.nodes[a][0], dy = S.nodes[b][1]-S.nodes[a][1], L = Math.hypot(dx,dy); if (!L) return;
+      const rx = u[2*b]-u[2*a], ry = u[2*b+1]-u[2*a+1];
+      if (Math.abs(rx*dy/L - ry*dx/L) > eps) badM.add(i);        // member swings sideways: part of a mechanism
+    });
+  });
+  red.forEach(v => { for (let i=0;i<sys.M;i++) if (Math.abs(v[i]) > eps) redM.add(i); });
+  return {badM, badN, redM, unknowns:cols, eqs:n2, unstable:mech.length>0};
+}
+
 function solve() {
-  S.anim = null;                       // any design change stops the load animation
+  S.anim = null;                      // any design change stops the load animation
   commit();
   if (!S.members.length || !S.supports.length) { S.res = null; return; }
   const sys = buildSystem();
   const x = gauss(sys.A, sys.F);
-  if (!x) { S.res = {error:true, sys}; return; }
+  if (!x) { S.res = {error:true, sys, diag:diagnose(sys)}; return; }
   S.res = {error:false, sys, x, member: x.slice(0,sys.M), react: sys.rc.map(r=>({n:r.n,dir:r.dir,v:x[r.c]}))};
   balsaCheck();
 }
@@ -265,6 +299,12 @@ function memberView(i, R) {
   if (S.colorMode === 'stress' && bl) { const r = bl.rows[i], t = r.fd + r.fl, cap = t >= 0 ? r.Tcap : r.Ccap; return {f, col: stressColor(Math.abs(t)/cap)}; }
   return {f, col: Math.abs(f)<1e-6 ? '#000' : f>0 ? '#00f' : '#f00'};
 }
+function errorText() {
+  const dg = S.res && S.res.diag; if (!dg) return 'Truss cannot be solved.';
+  const need = 'members + reaction components = '+dg.unknowns+', need at least 2 x '+S.nodes.length+' nodes = '+dg.eqs;
+  if (dg.unstable) return 'Unstable: ' + (dg.badM.size ? 'red members can swing freely' : 'the truss can slide (add or fix supports)') + (dg.badN.size ? ', red rings = loose nodes' : '') + '.' + (dg.unknowns < dg.eqs ? '|' + need + '.' : '');
+  return 'Statically indeterminate: orange members are redundant.|(' + need + '). Remove a member or support.';
+}
 function draw() {
   const W = cv.width, H = cv.height;
   ctx.fillStyle = '#c8e4ff'; ctx.fillRect(0,0,W,H);
@@ -281,7 +321,10 @@ function draw() {
   // members (double stacked ones are drawn bold)
   S.members.forEach((m,i) => {
     const [x1,y1] = toPx(...S.nodes[m[0]]), [x2,y2] = toPx(...S.nodes[m[1]]);
-    const {f,col} = memberView(i, R), dbl = isDbl(m), lw = (f===null ? 1 : 2) + (dbl ? 4 : 0);
+    let {f,col} = memberView(i, R); const dbl = isDbl(m); let lw = (f===null ? 1 : 2) + (dbl ? 4 : 0);
+    const dg = S.res && S.res.error ? S.res.diag : null;
+    if (dg && dg.badM.has(i)) { col = '#e00000'; lw += 3; }                       // unstable member
+    else if (dg && !dg.unstable && dg.redM.has(i)) { col = '#ff8c00'; lw += 2; }   // redundant member (indeterminate)
     if (failed && failed.i === i) {          // broken member: two stubs with a gap and a cross
       const mx = (x1+x2)/2, my = (y1+y2)/2, ux = (x2-x1), uy = (y2-y1), L = Math.hypot(ux,uy)||1, gx = ux/L*10, gy = uy/L*10;
       ctx.strokeStyle = '#b00000'; ctx.lineWidth = lw; ctx.beginPath();
@@ -354,7 +397,13 @@ function draw() {
     const w = ctx.measureText(txt).width + 12; ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(6,6,w,24);
     ctx.fillStyle = a.done ? '#b00000' : '#000'; ctx.fillText(txt, 12, 11);
   }
-  if (S.res && S.res.error) { ctx.fillStyle='#c00'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.fillText('Truss is unstable or statically indeterminate (cannot solve).', 8, 18); }
+  if (S.members.length && !S.supports.length) { ctx.fillStyle='#c00'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.fillText('No supports yet: add a pin and a roller (Design > Add).', 8, 18); }
+  if (S.res && S.res.error) {
+    const dg = S.res.diag;
+    if (dg && dg.unstable && !S.exporting) { ctx.strokeStyle = '#e00000'; ctx.lineWidth = 2.5; dg.badN.forEach(i => { if (!S.nodes[i]) return; const [x,y] = toPx(...S.nodes[i]); ctx.beginPath(); ctx.arc(x,y,12,0,7); ctx.stroke(); }); }
+    ctx.fillStyle='#c00'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    errorText().split('|').forEach((ln,k) => ctx.fillText(ln, 8, 18 + k*17));
+  }
 }
 
 /* ============ load-to-failure animation ============ */
@@ -540,8 +589,8 @@ function balsaPanel() {
 }
 function balsaOutHtml() {
   const R = S.res; let h;
-  if (!R) h = '<div id="balsaOut">Add nodes, members and supports to solve.</div>';
-  else if (R.error) h = '<div id="balsaOut" class="bad">Truss cannot be solved (unstable or indeterminate).</div>';
+  if (!R) h = '<div id="balsaOut"'+(S.members.length && !S.supports.length ? ' class="bad"' : '')+'>'+(S.members.length && !S.supports.length ? 'No supports yet: add a pin and a roller.' : 'Add nodes, members and supports to solve.')+'</div>';
+  else if (R.error) h = '<div id="balsaOut" class="bad">'+errorText().replace('|','<br>')+'</div>';
   else if (R.balsa) {
     const bl = R.balsa, g = bl.gov, u = S.fu;
     if (!g) h = '<div id="balsaOut">No member is loaded. Apply a force.</div>';
