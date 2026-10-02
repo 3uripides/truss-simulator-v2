@@ -92,7 +92,8 @@ const S = {
   matrix:false, tab:'design', mode:null, sel:null, res:null, drag:null,
   selN: [], selM: -1,                  // selected nodes / member (Design tab)
   colorMode:'tc',                      // 'tc' = tension/compression (blue/red), 'stress' = green to red by load vs capacity
-  anim:null, exporting:false
+  anim:null, exporting:false,
+  sym:false                            // symmetry: Design edits are mirrored across the vertical axis x = 0
 };
 const B = { b:3, t:3, rho:160, E:3700, st:20, sc:12, K:1, factor:0.6, selfw:true };
 const LEN = {cm:.01, mm:.001, m:1, in:.0254, ft:.3048};
@@ -122,6 +123,9 @@ const toWorld = (px,py) => [px / S.scale + S.x0, S.y0 - py / S.scale];
 const snap = (v,s) => s > 0 ? Math.round(v / s) * s : v;
 const len = m => Math.hypot(S.nodes[m[0]][0]-S.nodes[m[1]][0], S.nodes[m[0]][1]-S.nodes[m[1]][1]);
 const isDbl = m => m[2] === 1;
+const mirrorNode = i => { const [x,y] = S.nodes[i]; return S.nodes.findIndex(n => Math.abs(n[0]+x) < 1e-9 && Math.abs(n[1]-y) < 1e-9); };
+const mirrorNodeOrNew = i => { const j = mirrorNode(i); if (j >= 0) return j; S.nodes.push([0-S.nodes[i][0], S.nodes[i][1]]); return S.nodes.length - 1; };
+const findMember = (a,b) => S.members.findIndex(q => (q[0]===a&&q[1]===b)||(q[0]===b&&q[1]===a));
 function nodeAtOrNew(x,y) {               // snapped spot -> existing node there, or a new node
   const sx = snap(x,S.snapX), sy = snap(y,S.snapY);
   let i = S.nodes.findIndex(n => Math.abs(n[0]-sx) < 1e-9 && Math.abs(n[1]-sy) < 1e-9);
@@ -448,7 +452,7 @@ const colorBtn = () => '<button class="Submenu" data-colormode>Color view: '+(S.
 function render() {
   let h = '';
   (SUBS[S.tab] || []).forEach(([t,k]) => h += '<button class="'+(sub2===k?'Menu2':(sub2?'Menu2Mute':'Menu2'))+'" data-sub="'+k+'">'+t+'</button> ');
-  if (S.tab==='design') h += '<span style="display:inline-block;width:14px"></span><button class="Menu2'+(H.undo.length?'':' off')+'" data-undo title="Undo (Ctrl+Z)">&#8630; Undo</button> <button class="Menu2'+(H.redo.length?'':' off')+'" data-redo title="Redo (Ctrl+Y)">Redo &#8631;</button>';
+  if (S.tab==='design') h += '<span style="display:inline-block;width:14px"></span><button class="Menu2'+(H.undo.length?'':' off')+'" data-undo title="Undo (Ctrl+Z)">&#8630; Undo</button> <button class="Menu2'+(H.redo.length?'':' off')+'" data-redo title="Redo (Ctrl+Y)">Redo &#8631;</button> <span style="display:inline-block;width:14px"></span><button class="Menu2" data-sym title="Mirror edits across the vertical axis x = 0" style="'+(S.sym?'outline:3px solid #ff8c00;font-weight:bold':'')+'">&#8646; Symmetry: '+(S.sym?'On':'Off')+'</button>';
   $('sub').innerHTML = h;
   let extra = '';
   if (S.tab==='design' && LEAF[sub2]) {
@@ -490,6 +494,8 @@ function guideHtml() {
     + '<li><b>Drag a node</b> to move it. Drag the tip of a force arrow to change that force.</li>'
     + '<li><b>Box select:</b> drag on empty space to select several nodes (orange rings), then drag them together. <kbd>Shift</kbd>+click adds or removes a node. Click a member to select it.</li>'
     + '<li><b>Delete / Backspace</b> removes the selected nodes (and the members attached) or the selected member.</li></ul>'
+    + '<h3>Symmetry</h3><ul>'
+    + '<li>Design tab, next to Undo / Redo: when <b>Symmetry</b> is on, adding, deleting, dragging and stacking nodes, members, forces and supports is mirrored across the vertical axis x = 0. Build one half and the other follows.</li></ul>'
     + '<h3>Delete options</h3><ul>'
     + '<li>Delete &gt; <b>Single</b> removes a node, member or force arrow tip. <b>Force</b> removes forces. <b>Support</b> removes just the support and keeps the node. <b>All</b> clears everything (Ctrl+Z brings it back).</li></ul>'
     + '<h3>Undo / redo</h3><ul>'
@@ -624,6 +630,7 @@ document.addEventListener('click', e => {
     else if (k==='alldbl' || k==='allsgl') { S.members.forEach(m => { m[2] = k==='alldbl' ? 1 : 0; }); fresh(); return; }
     else { S.mode = k; S.sel = null; }
     render(); }
+  else if (d.sym !== undefined) { S.sym = !S.sym; render(); }
   else if (d.undo !== undefined) undo();
   else if (d.redo !== undefined) redo();
   else if (d.hide) { S.show[d.hide] = false; render(); }
@@ -714,11 +721,12 @@ cv.onmousemove = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py);
   if (d.k==='group') {
     if (S.selN.length === 1) S.nodes[S.selN[0]] = [snap(x,S.snapX), snap(y,S.snapY)];
     else { const dx = snap(x-d.sx,S.snapX), dy = snap(y-d.sy,S.snapY); S.selN.forEach(i => { S.nodes[i] = [d.orig[i][0]+dx, d.orig[i][1]+dy]; }); }
+    Object.keys(d.mir).forEach(i => { S.nodes[d.mir[i]] = [0-S.nodes[i][0], S.nodes[i][1]]; });
   } else if (d.k==='force') { const [nx,ny] = S.nodes[S.forces[d.i].n]; S.forces[d.i].fx = +((x-nx)*S.arrowN).toFixed(2); S.forces[d.i].fy = +((y-ny)*S.arrowN).toFixed(2); }
   solve(); buildTables(); buildMatrix(); draw();
 };
 cv.onmouseleave = () => { $('mouseLoc').textContent = 'N/A'; };
-function startGroupDrag(x,y) { const orig = {}; S.selN.forEach(i => { orig[i] = [...S.nodes[i]]; }); S.drag = {k:'group', sx:x, sy:y, orig}; }
+function startGroupDrag(x,y) { const orig = {}, mir = {}; S.selN.forEach(i => { orig[i] = [...S.nodes[i]]; if (S.sym) { const j = mirrorNode(i); if (j >= 0 && j !== i && !S.selN.includes(j)) mir[i] = j; } }); S.drag = {k:'group', sx:x, sy:y, orig, mir}; }
 cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mode, ni = hitNode(px,py);
   if (S.anim) { S.anim = null; render(); }
   if (m==='pan') { S.drag = {k:'pan',px,py,x0:S.x0,y0:S.y0}; return; }
@@ -735,23 +743,26 @@ cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mo
       else { S.selN = e.shiftKey ? S.selN : []; S.selM = -1; S.drag = {k:'box', px, py, x1:px, y1:py}; draw(); } }
     return;
   }
-  if (m==='node') { nodeAtOrNew(x,y); fresh(); }
+  if (m==='node') { const a = nodeAtOrNew(x,y); if (S.sym) mirrorNodeOrNew(a); fresh(); }
   else if (m==='member') {                                           // blank space makes a node there
     const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
     if (!S.sel) S.sel = {n:t};
-    else { const a = S.sel.n; S.sel = null; if (a!==t && !S.members.some(q=>(q[0]===a&&q[1]===t)||(q[0]===t&&q[1]===a))) S.members.push([a,t]); }
+    else { const a = S.sel.n; S.sel = null; if (a!==t && findMember(a,t) < 0) S.members.push([a,t]);
+      if (S.sym) { const ma = mirrorNodeOrNew(a), mt = mirrorNodeOrNew(t); if (ma!==mt && findMember(ma,mt) < 0) S.members.push([ma,mt]); } }
     fresh(); }
-  else if (m==='force') { const t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); fresh(); }
+  else if (m==='force') { const t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); if (S.sym) { const mt = mirrorNodeOrNew(t); if (mt!==t) S.forces.push({n:mt,fx:0,fy:-10}); } fresh(); }
   else if (m==='pin'||m==='hroll'||m==='vroll') {                    // on a node: make it a support; on blank space: new node there
     const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
-    S.supports = S.supports.filter(s=>s.n!==t); S.supports.push({n:t,type:m}); fresh(); }
+    (S.sym ? [t, mirrorNodeOrNew(t)] : [t]).forEach(n => { S.supports = S.supports.filter(s=>s.n!==n); S.supports.push({n,type:m}); }); fresh(); }
   else if (m==='single') { const fi = forceTipAt(px,py);
-    if (fi >= 0) { S.forces.splice(fi,1); fresh(); }
-    else if (ni >= 0) { removeNodes([ni]); fresh(); }
-    else { const mi = hitMember(px,py); if (mi >= 0) { S.members.splice(mi,1); S.selM = -1; fresh(); } } }
+    if (fi >= 0) { const f = S.forces[fi], mn = S.sym ? mirrorNode(f.n) : -1; S.forces = S.forces.filter((q,k) => k!==fi && !(mn>=0 && mn!==f.n && q.n===mn && Math.abs(q.fx+f.fx)<1e-9 && Math.abs(q.fy-f.fy)<1e-9)); fresh(); }
+    else if (ni >= 0) { const mn = S.sym ? mirrorNode(ni) : -1; removeNodes(mn >= 0 && mn !== ni ? [ni,mn] : [ni]); fresh(); }
+    else { const mi = hitMember(px,py); if (mi >= 0) { const q = S.members[mi], ma = S.sym ? mirrorNode(q[0]) : -1, mb = S.sym ? mirrorNode(q[1]) : -1, mm = ma>=0 && mb>=0 ? findMember(ma,mb) : -1;
+      S.members = S.members.filter((_,k) => k!==mi && k!==mm); S.selM = -1; fresh(); } } }
   else if (m==='dforce') { const fi = forceTipAt(px,py); if (fi >= 0) S.forces.splice(fi,1); else if (ni >= 0) S.forces = S.forces.filter(f=>f.n!==ni); else return; fresh(); }
   else if (m==='dsup') { if (ni >= 0 && S.supports.some(s=>s.n===ni)) { S.supports = S.supports.filter(s=>s.n!==ni); fresh(); } }
-  else if (m==='dbl' || m==='sgl') { const mi = hitMember(px,py); if (mi >= 0) { S.members[mi][2] = m==='dbl' ? 1 : 0; fresh(); } }
+  else if (m==='dbl' || m==='sgl') { const mi = hitMember(px,py); if (mi >= 0) { const q = S.members[mi], ma = S.sym ? mirrorNode(q[0]) : -1, mb = S.sym ? mirrorNode(q[1]) : -1, mm = ma>=0 && mb>=0 ? findMember(ma,mb) : -1;
+      q[2] = m==='dbl' ? 1 : 0; if (mm >= 0) S.members[mm][2] = q[2]; fresh(); } }
   else if (m==='mforce') { const fi = forceTipAt(px,py); if (fi >= 0) S.drag = {k:'force', i:fi}; }
 };
 window.onmouseup = () => {
