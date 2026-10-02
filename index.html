@@ -124,7 +124,17 @@ const snap = (v,s) => s > 0 ? Math.round(v / s) * s : v;
 const len = m => Math.hypot(S.nodes[m[0]][0]-S.nodes[m[1]][0], S.nodes[m[0]][1]-S.nodes[m[1]][1]);
 const isDbl = m => m[2] === 1;
 const mirrorNode = i => { const [x,y] = S.nodes[i]; return S.nodes.findIndex(n => Math.abs(n[0]+x) < 1e-9 && Math.abs(n[1]-y) < 1e-9); };
-const mirrorNodeOrNew = i => { const j = mirrorNode(i); if (j >= 0) return j; S.nodes.push([0-S.nodes[i][0], S.nodes[i][1]]); return S.nodes.length - 1; };
+const mirrorNodeOrNew = i => { const j = mirrorNode(i); if (j >= 0) return j; return newNode(0-S.nodes[i][0], S.nodes[i][1]); };
+function newNode(x,y) {                         // add a node; any member it lands on is split into two members there
+  S.nodes.push([x,y]); const i = S.nodes.length - 1;
+  S.members = S.members.flatMap(m => {
+    const [a,b] = m; if (a===i || b===i) return [m];
+    const [ax,ay] = S.nodes[a], dx = S.nodes[b][0]-ax, dy = S.nodes[b][1]-ay, L2 = dx*dx+dy*dy; if (!L2) return [m];
+    const t = ((x-ax)*dx+(y-ay)*dy)/L2;
+    return t > 1e-9 && t < 1-1e-9 && Math.hypot(ax+t*dx-x, ay+t*dy-y) < 1e-6 ? [[a,i,...m.slice(2)],[i,b,...m.slice(2)]] : [m];
+  });
+  return i;
+}
 const findMember = (a,b) => S.members.findIndex(q => (q[0]===a&&q[1]===b)||(q[0]===b&&q[1]===a));
 function addMember(a,b) {                       // a member passing through other nodes is split at each of them
   if (a===b) return;
@@ -140,7 +150,7 @@ function addMember(a,b) {                       // a member passing through othe
 function nodeAtOrNew(x,y) {               // snapped spot -> existing node there, or a new node
   const sx = snap(x,S.snapX), sy = snap(y,S.snapY);
   let i = S.nodes.findIndex(n => Math.abs(n[0]-sx) < 1e-9 && Math.abs(n[1]-sy) < 1e-9);
-  if (i < 0) { S.nodes.push([sx,sy]); i = S.nodes.length - 1; }
+  if (i < 0) i = newNode(sx,sy);
   return i;
 }
 
@@ -451,6 +461,27 @@ function buildTables() {
   if (R && R.balsa && S.tab==='balsa') h += balsaTables(R.balsa);
   $('tables').innerHTML = h;
 }
+// parts list only: members that join end to end in a straight line (same stacking) count as one stick, labelled by its two outer nodes.
+// The model itself keeps them as separate members.
+function partsList() {
+  const M = S.members, par = M.map((_,i) => i), root = i => par[i]===i ? i : (par[i] = root(par[i]));
+  const vec = (m,n) => { const o = m[0]===n ? m[1] : m[0]; return [S.nodes[o][0]-S.nodes[n][0], S.nodes[o][1]-S.nodes[n][1]]; };
+  S.nodes.forEach((_,n) => {
+    const inc = M.map((m,i) => i).filter(i => M[i][0]===n || M[i][1]===n);
+    for (let x=0; x<inc.length; x++) for (let y=x+1; y<inc.length; y++) {
+      const i = inc[x], j = inc[y]; if (isDbl(M[i]) !== isDbl(M[j])) continue;
+      const u = vec(M[i],n), v = vec(M[j],n), lu = Math.hypot(...u), lv = Math.hypot(...v); if (!lu || !lv) continue;
+      if (Math.abs(u[0]*v[1]-u[1]*v[0]) < 1e-6*lu*lv && u[0]*v[0]+u[1]*v[1] < 0) par[root(i)] = root(j);   // collinear, on opposite sides of the node
+    }
+  });
+  const g = {}; M.forEach((m,i) => (g[root(i)] = g[root(i)] || []).push(i));
+  return Object.values(g).map(ids => {
+    const nodes = [...new Set(ids.flatMap(i => [M[i][0], M[i][1]]))], o = S.nodes[nodes[0]];
+    const d = vec(M[ids[0]], M[ids[0]][0]), proj = n => (S.nodes[n][0]-o[0])*d[0] + (S.nodes[n][1]-o[1])*d[1];
+    nodes.sort((p,q) => proj(p)-proj(q));
+    return {label: nodes[0]+'-'+nodes[nodes.length-1], len: ids.reduce((a,i) => a+len(M[i]), 0), dbl: isDbl(M[ids[0]])};
+  });
+}
 function balsaTables(bl) {
   const small = (title, cols, rows) => '<table class="data"><tr><th colspan="'+cols+'" style="text-align:left;padding:2px 4px">'+title+'</th></tr>'+rows+'</table>';
   const hd = a => '<tr>'+a.map(t=>'<td class="hd">'+t+'</td>').join('')+'</tr>';
@@ -465,13 +496,13 @@ function balsaTables(bl) {
     p += '<tr'+st+'><td>'+r.i+'</td><td>('+fmt(r.p[0],2)+', '+fmt(r.p[1],2)+')</td><td>'+(r.fail===null?'n/a':isFinite(r.fail)?fmt(r.fail,1):'&infin;')+'</td><td>'+(r.gov?r.gov.m[0]+'-'+r.gov.m[1]:'-')+'</td></tr>'; });
   h += small('Where to put the load (single downward load)', 4, p + '<tr><td colspan="4" style="font-size:12px">red = weakest spot, green = strongest spot</td></tr>');
   // cut list / parts
-  const groups = {}; let sticks = 0, total = 0;
-  S.members.forEach(m => { const key = fmt(len(m),2), g = groups[key] = groups[key] || {len:len(m), members:0, sticks:0}; g.members++; const k = isDbl(m)?2:1; g.sticks += k; sticks += k; total += k*len(m); });
-  let c = hd(['Length ['+S.lu+']','Members','Sticks to cut']);
-  Object.values(groups).sort((a,b) => b.len - a.len).forEach(g => c += '<tr><td>'+fmt(g.len,2)+'</td><td>'+g.members+'</td><td>'+g.sticks+'</td></tr>');
-  c += '<tr><td><b>Total</b></td><td>'+S.members.length+'</td><td><b>'+sticks+'</b></td></tr>'
-     + '<tr><td colspan="3" style="text-align:left;font-size:13px">Stick size '+fmt(B.b,2)+' &times; '+fmt(B.t,2)+' mm<br>Balsa needed: '+fmt(total,1)+' '+S.lu+' of stick<br>Truss weight: '+fmt(bl.mass*1000,1)+' g</td></tr>';
-  h += small('Parts list (cut list)', 3, c);
+  const groups = {}, parts = partsList(); let sticks = 0, total = 0;
+  parts.forEach(p => { const key = fmt(p.len,2), g = groups[key] = groups[key] || {len:p.len, members:0, sticks:0, labels:[]}; g.members++; g.labels.push(p.label); const k = p.dbl?2:1; g.sticks += k; sticks += k; total += k*p.len; });
+  let c = hd(['Length ['+S.lu+']','Members','Sticks to cut','Labels']);
+  Object.values(groups).sort((a,b) => b.len - a.len).forEach(g => c += '<tr><td>'+fmt(g.len,2)+'</td><td>'+g.members+'</td><td>'+g.sticks+'</td><td style="font-size:12px">'+g.labels.join(', ')+'</td></tr>');
+  c += '<tr><td><b>Total</b></td><td>'+parts.length+'</td><td><b>'+sticks+'</b></td><td></td></tr>'
+     + '<tr><td colspan="4" style="text-align:left;font-size:13px">Stick size '+fmt(B.b,2)+' &times; '+fmt(B.t,2)+' mm<br>Balsa needed: '+fmt(total,1)+' '+S.lu+' of stick<br>Truss weight: '+fmt(bl.mass*1000,1)+' g</td></tr>';
+  h += small('Parts list (cut list)', 4, c);
   return h;
 }
 function buildMatrix() {
@@ -710,7 +741,7 @@ document.addEventListener('click', e => {
   else if (d.pre) { applyDesign(PRE[d.pre]); fresh(); }
   else if (d.dl !== undefined) download(new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B,dims:dimsObj()})],{type:'application/json'}), safeName('fname','json'));
   else if (d.png !== undefined) { S.exporting = true; draw(); const name = safeName('pname','png'); cv.toBlob(b => download(b, name)); S.exporting = false; draw(); }
-  else if (d.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { S.nodes.push([x,y]); fresh(); } }
+  else if (d.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { newNode(x,y); fresh(); } }
   else if (d.z) zoomCmd(d.z);
   else if (d.lab) { S.show[d.lab] = !S.show[d.lab]; draw(); }
   else if (d.var) editVar(t);
