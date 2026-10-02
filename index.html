@@ -10,6 +10,7 @@
   .Menu { background: rgb(0,0,255); color: #fff; border: none; padding: 3px 8px; margin: 5px 0; cursor: pointer; }
   .Menu2 { background: rgb(46,130,255); color: #fff; border: none; padding: 3px 8px; margin: 0 0 5px; cursor: pointer; }
   .Menu2Mute { background: rgb(150,192,255); color: #fff; border: none; padding: 3px 8px; margin: 0 0 5px; cursor: pointer; }
+  .Menu2.off { opacity: .45; cursor: default; }
   .Submenu { background: rgb(240,240,240); color: #000; border: 1.6px outset #000; padding: 1px 6px; margin: 0 0 5px; cursor: pointer; }
   .Submenu.on { border-style: inset; background: rgb(200,200,200); }
   .Variable { background: #fff; color: #00f; font-weight: bold; border: none; padding: 0; text-decoration: underline; cursor: pointer; }
@@ -17,13 +18,13 @@
   .hidden { display: none; }
   #wrap { position: relative; display: inline-block; }
   canvas { border: 1px solid #000; display: block; cursor: crosshair; }
-  #tables { display: flex; align-items: flex-start; margin-top: 5px; }
-  #tables > table { margin-right: 10px; }
+  #tables { display: flex; flex-wrap: wrap; align-items: flex-start; margin-top: 5px; }
+  #tables > table { margin: 0 10px 10px 0; }
   table.data { border-collapse: collapse; }
   table.data th { background: #000; color: #fff; padding: 1px; border: 1px solid #000; }
   table.data td { border: 1px solid #000; padding: 1px 3px; text-align: center; height: 24px; }
   table.data td.hd { font-weight: bold; }
-  table.data input { width: 57px; font-family: Arial; font-size: 13.3333px; padding: 1px 2px; box-sizing: border-box; }
+  table.data input[type=number], table.data input[type=text] { width: 57px; font-family: Arial; font-size: 13.3333px; padding: 1px 2px; box-sizing: border-box; }
   .minus { background: none; border: none; color: #8a7cff; font-weight: bold; cursor: pointer; padding: 0 2px; float: right; }
   .compress { color: red; } .tension { color: #00f; } .react { color: green; }
   #matrix { margin-top: 10px; }
@@ -34,21 +35,31 @@
   #balsa table { border-collapse: collapse; margin-bottom: 6px; }
   #balsa td { padding: 2px 6px; }
   #balsaOut { margin: 4px 0; }
+  #loadTest { margin: 6px 0; }
+  #loadSlider { width: 280px; vertical-align: middle; }
   .bad { color: #c00; font-weight: bold; } .good { color: #060; font-weight: bold; }
   #footer { margin-top: 12px; }
-  #darkToggle { position: fixed; top: 10px; right: 10px; z-index: 10; background: rgb(240,240,240); color: #000; border: 1.6px outset #000; padding: 2px 8px; cursor: pointer; }
+  #topRight { position: fixed; top: 10px; right: 10px; z-index: 10; display: flex; gap: 6px; }
+  #topRight button { background: rgb(240,240,240); color: #000; border: 1.6px outset #000; padding: 2px 8px; cursor: pointer; }
+  #guide { position: fixed; top: 40px; right: 10px; z-index: 11; width: 380px; max-width: calc(100vw - 20px); max-height: calc(100vh - 60px); overflow-y: auto; background: #fff; color: #000; border: 1px solid #000; box-shadow: 0 4px 14px rgba(0,0,0,.35); padding: 8px 12px; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.45; }
+  #guide h3 { font-size: 14px; margin: 10px 0 3px; } #guide h3:first-child { margin-top: 0; }
+  #guide ul { margin: 0; padding-left: 18px; } #guide li { margin-bottom: 3px; }
+  #guide kbd { background: #eee; color: #000; border: 1px solid #999; border-radius: 3px; padding: 0 4px; font-size: 12px; }
   /* dark mode: only the black text and white page background change; canvas and blue buttons are untouched */
   html.dark { background: #161616; color-scheme: dark; }
   html.dark body { background: #161616; color: #e8e8e8; }
   html.dark table.data td, html.dark #matrix td { border-color: #888; }
   html.dark .Variable { background: transparent; }
+  html.dark #guide { background: #232323; color: #e8e8e8; border-color: #888; }
+  html.dark #guide kbd { background: #444; color: #eee; border-color: #888; }
   html.dark #footer div:first-child { color: #6fa0ff !important; }
-  html.dark #t_balsa tr[style] td { color: #000; }
+  html.dark table.data tr[style] td { color: #000; }
   html.dark .good { color: #5fdc5f; } html.dark .bad { color: #ff6b6b; }
 </style>
 </head>
 <body>
-<button id="darkToggle" type="button">&#9790; Dark mode</button>
+<div id="topRight"><button id="guideBtn" type="button" aria-expanded="false">&#9776; Guide</button><button id="darkToggle" type="button">&#9790; Dark mode</button></div>
+<div id="guide" class="hidden"></div>
 <h1>Truss Simulator (v2, with balsa wood limits)</h1>
 <div>
   <button class="Menu" data-tab="design">Design</button>
@@ -73,19 +84,22 @@
 <script>
 /* ============ state ============ */
 const S = {
-  nodes: [],
-  members: [],
-  forces: [],
-  supports: [],
+  nodes: [], members: [],            // members: [nodeA, nodeB, 1 if double stacked]
+  forces: [], supports: [],
   lu:'cm', fu:'N', snapX:1, snapY:1, arrowN:5,
   scale: 607/22, x0: -11, y0: 6.5,     // world coord at canvas top-left: x=x0, y=y0
   show: {vec:true, mtext:true, ftext:true, ntext:true, nodeList:true, memList:true, forceList:true},
-  matrix:false, tab:'design', mode:null, sel:null, res:null, drag:null
+  matrix:false, tab:'design', mode:null, sel:null, res:null, drag:null,
+  selN: [], selM: -1,                  // selected nodes / member (Design tab)
+  colorMode:'tc',                      // 'tc' = tension/compression (blue/red), 'stress' = green to red by load vs capacity
+  anim:null, exporting:false
 };
 const B = { b:3, t:3, rho:160, E:3700, st:20, sc:12, K:1, factor:0.6, selfw:true };
 const LEN = {cm:.01, mm:.001, m:1, in:.0254, ft:.3048};
 const PRE = {
-  1: null,
+  1: {nodes:[[-9,0],[9,0],[0,3],[0,0],[-7,3],[-5,0],[-3,3],[-1,0],[1,0],[3,3],[5,0],[7,3]],
+      members:[[0,5],[3,8],[3,7],[5,7],[1,10],[8,10],[9,11],[2,9],[4,6],[2,6],[0,4],[1,11],[10,11],[8,9],[9,10],[2,8],[2,7],[6,7],[5,6],[4,5],[2,3]],
+      forces:[{n:2,fx:0,fy:-10}], supports:[{n:0,type:'pin'},{n:1,type:'hroll'}]},
   2: {nodes:[[-9,0],[9,0],[-6,0],[-3,0],[0,0],[3,0],[6,0],[-4.5,3],[-1.5,3],[1.5,3],[4.5,3]],
       members:[[0,2],[2,3],[3,4],[4,5],[5,6],[6,1],[0,7],[7,2],[7,8],[2,8],[8,3],[8,9],[3,9],[9,4],[9,10],[4,10],[10,5],[5,7]].filter(m=>m[1]!==7||m[0]!==5),
       forces:[{n:4,fx:0,fy:-10}], supports:[{n:0,type:'pin'},{n:1,type:'hroll'}]},
@@ -100,15 +114,23 @@ const PRE = {
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const $ = id => document.getElementById(id);
 const fmt = (v,d=4) => (v===undefined||v===null||isNaN(v)) ? '' : String(parseFloat(v.toFixed(d)));
+const clone = o => JSON.parse(JSON.stringify(o));
 
 /* ============ geometry helpers ============ */
 const toPx = (x,y) => [(x - S.x0) * S.scale, (S.y0 - y) * S.scale];
 const toWorld = (px,py) => [px / S.scale + S.x0, S.y0 - py / S.scale];
 const snap = (v,s) => s > 0 ? Math.round(v / s) * s : v;
 const len = m => Math.hypot(S.nodes[m[0]][0]-S.nodes[m[1]][0], S.nodes[m[0]][1]-S.nodes[m[1]][1]);
+const isDbl = m => m[2] === 1;
+function nodeAtOrNew(x,y) {               // snapped spot -> existing node there, or a new node
+  const sx = snap(x,S.snapX), sy = snap(y,S.snapY);
+  let i = S.nodes.findIndex(n => Math.abs(n[0]-sx) < 1e-9 && Math.abs(n[1]-sy) < 1e-9);
+  if (i < 0) { S.nodes.push([sx,sy]); i = S.nodes.length - 1; }
+  return i;
+}
 
 /* ============ solver: method of joints ============ */
-function buildSystem(extra) {
+function buildSystem(extra, forces) {
   const n = S.nodes.length, M = S.members.length;
   const cols = M + S.supports.reduce((a,s)=>a+(s.type==='pin'?2:1),0);
   const A = Array.from({length:2*n}, () => new Array(cols).fill(0));
@@ -126,8 +148,7 @@ function buildSystem(extra) {
     else if (s.type==='hroll') { A[2*s.n+1][c]=1; labels.push('S'+s.n+'y'); rc.push({n:s.n,dir:'y',c}); c++; }
     else { A[2*s.n][c]=1; labels.push('S'+s.n+'x'); rc.push({n:s.n,dir:'x',c}); c++; }
   });
-  S.forces.forEach(f => { F[2*f.n] -= f.fx; F[2*f.n+1] -= f.fy; });
-  if (extra) extra.forEach((w,i) => { F[2*i+1] -= w; });      // extra vertical nodal loads (weights, as -N)
+  (forces || S.forces).forEach(f => { F[2*f.n] -= f.fx; F[2*f.n+1] -= f.fy; });
   return {A, F, labels, rc, M, cols};
 }
 // Gaussian elimination with rank detection. returns array or null (unstable / indeterminate / inconsistent)
@@ -149,6 +170,7 @@ function gauss(A0, F0) {
   return x;
 }
 function solve() {
+  S.anim = null;                       // any design change stops the load animation
   commit();
   if (!S.members.length || !S.supports.length) { S.res = null; return; }
   const sys = buildSystem();
@@ -159,37 +181,58 @@ function solve() {
 }
 
 /* ============ balsa wood checks (the added feature) ============ */
+// cross-section of a member: single = b x t, double stacked = b x 2t (e.g. 3 x 6 mm). Weak-axis I is used for buckling.
+function section(m) {
+  const b = B.b/1000, t = B.t/1000*(isDbl(m)?2:1);
+  return {A: b*t, I: Math.min(b,t)**3*Math.max(b,t)/12};
+}
+function memberCaps() {
+  const k = LEN[S.lu] || .01;
+  return S.members.map(m => {
+    const {A,I} = section(m), L = len(m)*k;
+    const Tcap = B.st*1e6*A*B.factor, crush = B.sc*1e6*A*B.factor;
+    const Pcr = L>0 ? Math.PI**2*(B.E*1e6)*I/((B.K*L)**2) : Infinity;
+    return {A, I, L, Tcap, Ccap: Math.min(crush,Pcr), buckles: Pcr < crush};
+  });
+}
+// given live-load member forces (per unit of the applied load pattern) find the load factor each member fails at
+function evalRows(fl, caps, dead) {
+  return S.members.map((m,i) => {
+    const c = caps[i], f = fl[i], fd = dead[i];
+    let lam = Infinity, mode = '-';
+    if (Math.abs(f) > 1e-9) {
+      if (f > 0) { lam = (c.Tcap - fd)/f; mode = 'tension break'; }
+      else { lam = (-c.Ccap - fd)/f; mode = c.buckles ? 'buckling' : 'crushing'; }
+    }
+    return {i, m, fl:f, fd, Tcap:c.Tcap, Ccap:c.Ccap, mode, lam: Math.max(lam,0), L:c.L};
+  });
+}
+const weakest = rows => rows.reduce((g,r) => isFinite(r.lam) && (!g || r.lam < g.lam) ? r : g, null);
 function balsaCheck() {
   const R = S.res; R.balsa = null;
-  const k = LEN[S.lu] || .01;
-  const b = B.b/1000, t = B.t/1000, A = b*t, I = Math.min(b,t)**3*Math.max(b,t)/12;   // m, m^2, m^4 (weak axis)
-  const Tcap = B.st*1e6*A*B.factor;
-  // self-weight: half of each member's weight to each end node (downward, N)
+  const caps = memberCaps(), k = LEN[S.lu] || .01;
+  // self-weight: half of each member's weight to each end node (downward)
   const w = new Array(S.nodes.length).fill(0); let mass = 0;
-  S.members.forEach(m => { const mm = B.rho*A*len(m)*k; mass += mm; w[m[0]] += 9.81*mm/2; w[m[1]] += 9.81*mm/2; });
+  S.members.forEach((m,i) => { const mm = B.rho*caps[i].A*len(m)*k; mass += mm; w[m[0]] += 9.81*mm/2; w[m[1]] += 9.81*mm/2; });
   let dead = new Array(S.members.length).fill(0);
   if (B.selfw) {
-    const sysD = buildSystem(w.map(v=>-v)); sysD.F = new Array(sysD.F.length).fill(0);
-    S.nodes.forEach((_,i)=>{ sysD.F[2*i+1] += w[i]*0; });
-    // weights act downward: joint equilibrium  sum(member+reaction) + load = 0  ->  F = -load = +w
-    const F = new Array(2*S.nodes.length).fill(0); S.nodes.forEach((_,i)=>{ F[2*i+1] = w[i]; });
-    const xd = gauss(sysD.A, F); if (xd) dead = xd.slice(0,S.members.length);
+    const sys = buildSystem(), F = new Array(2*S.nodes.length).fill(0);
+    S.nodes.forEach((_,i)=>{ F[2*i+1] = w[i]; });          // weight acts downward: F = -load = +w
+    const xd = gauss(sys.A, F); if (xd) dead = xd.slice(0,S.members.length);
   }
-  const rows = S.members.map((m,i) => {
-    const L = len(m)*k, Pcr = Math.PI**2*(B.E*1e6)*I/((B.K*L)**2);
-    const crush = B.sc*1e6*A*B.factor, Ccap = Math.min(crush, Pcr);
-    const fl = R.member[i], fd = dead[i];
-    // find largest lambda>=0 with -Ccap <= fd + lambda*fl <= Tcap
-    let lam = Infinity, mode = '-';
-    if (Math.abs(fl) > 1e-9) {
-      if (fl > 0) { lam = (Tcap - fd)/fl; mode = 'tension break'; }
-      else { lam = (-Ccap - fd)/fl; mode = Pcr < crush ? 'buckling' : 'crushing'; }
-    }
-    return {i, m, fl, fd, Tcap, Ccap, mode, lam: Math.max(lam,0), L};
+  const rows = evalRows(R.member, caps, dead), g = weakest(rows);
+  const Wapp = S.forces.reduce((a,f)=>a+Math.abs(f.fy),0), Wtot = S.forces.reduce((a,f)=>a+Math.hypot(f.fx,f.fy),0);
+  R.balsa = {rows, gov:g, lam: g?g.lam:Infinity, mass, Wapp, Wtot, scale: Wapp>0?Wapp:Wtot, caps, dead};
+}
+// failure load (N) if one downward load were put on each node instead of the current loads
+function placementTable() {
+  const R = S.res, bl = R && R.balsa; if (!bl) return [];
+  return S.nodes.map((p,i) => {
+    const sys = buildSystem(null, [{n:i,fx:0,fy:-1}]), x = gauss(sys.A, sys.F);
+    if (!x) return {i, p, fail:null};
+    const g = weakest(evalRows(x.slice(0,S.members.length), bl.caps, bl.dead));
+    return {i, p, fail: g ? g.lam : Infinity, gov: g};
   });
-  let g = null; rows.forEach(r => { if (isFinite(r.lam) && (!g || r.lam < g.lam)) g = r; });
-  const Wapp = S.forces.reduce((a,f)=>a+Math.abs(f.fy),0);
-  R.balsa = {rows, gov:g, lam: g?g.lam:Infinity, mass, Wapp};
 }
 
 /* ============ drawing ============ */
@@ -208,6 +251,16 @@ function label(txt,x,y,border,color='#000') {
   ctx.strokeStyle = border; ctx.lineWidth = 1; ctx.strokeRect(x-w/2, y-8, w, 16);
   ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, x, y+1);
 }
+const stressColor = r => r >= 1 ? '#b00000' : 'hsl(' + Math.round(120*(1-r)) + ',85%,38%)';   // green (unloaded) -> red (at capacity)
+// force shown for a member and the colour to draw it in
+function memberView(i, R) {
+  const bl = R && R.balsa, a = S.anim;
+  if (a && bl) { const r = bl.rows[i], f = r.fd + a.lam*r.fl, cap = f >= 0 ? r.Tcap : r.Ccap; return {f, col: stressColor(Math.abs(f)/cap)}; }
+  const f = R ? R.member[i] : null;
+  if (f === null) return {f, col:'#000'};
+  if (S.colorMode === 'stress' && bl) { const r = bl.rows[i], t = r.fd + r.fl, cap = t >= 0 ? r.Tcap : r.Ccap; return {f, col: stressColor(Math.abs(t)/cap)}; }
+  return {f, col: Math.abs(f)<1e-6 ? '#000' : f>0 ? '#00f' : '#f00'};
+}
 function draw() {
   const W = cv.width, H = cv.height;
   ctx.fillStyle = '#c8e4ff'; ctx.fillRect(0,0,W,H);
@@ -219,26 +272,32 @@ function draw() {
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(150,195,240,.75)';
   let o = toPx(0,0); ctx.beginPath(); ctx.moveTo(o[0],0); ctx.lineTo(o[0],H); ctx.moveTo(0,o[1]); ctx.lineTo(W,o[1]); ctx.stroke();
 
-  const R = S.res && !S.res.error ? S.res : null, tab = S.tab, solved = R && tab !== 'design' && tab !== 'io' && tab !== 'dims' || (R && tab==='dims') || (R && tab==='io') || (R && tab==='design');
-  const gov = R && R.balsa && R.balsa.gov;
-  // members
+  const R = S.res && !S.res.error ? S.res : null, tab = S.tab, a = S.anim;
+  const gov = R && R.balsa && R.balsa.gov, failed = a && a.done ? a.gov : null;
+  // members (double stacked ones are drawn bold)
   S.members.forEach((m,i) => {
     const [x1,y1] = toPx(...S.nodes[m[0]]), [x2,y2] = toPx(...S.nodes[m[1]]);
-    const f = R ? R.member[i] : null;
-    const col = f===null ? '#000' : Math.abs(f)<1e-6 ? '#000' : f>0 ? '#00f' : '#f00';
-    ctx.strokeStyle = col; ctx.lineWidth = f===null ? 1 : 2;
-    if (tab==='balsa' && gov && gov.i===i) { ctx.strokeStyle = '#ff8c00'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.strokeStyle = col; ctx.lineWidth = 2; }
+    const {f,col} = memberView(i, R), dbl = isDbl(m), lw = (f===null ? 1 : 2) + (dbl ? 4 : 0);
+    if (failed && failed.i === i) {          // broken member: two stubs with a gap and a cross
+      const mx = (x1+x2)/2, my = (y1+y2)/2, ux = (x2-x1), uy = (y2-y1), L = Math.hypot(ux,uy)||1, gx = ux/L*10, gy = uy/L*10;
+      ctx.strokeStyle = '#b00000'; ctx.lineWidth = lw; ctx.beginPath();
+      ctx.moveTo(x1,y1); ctx.lineTo(mx-gx,my-gy); ctx.moveTo(x2,y2); ctx.lineTo(mx+gx,my+gy); ctx.stroke();
+      ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(mx-7,my-7); ctx.lineTo(mx+7,my+7); ctx.moveTo(mx+7,my-7); ctx.lineTo(mx-7,my+7); ctx.stroke();
+      return;
+    }
+    if (tab==='balsa' && !a && gov && gov.i===i) { ctx.strokeStyle = '#ff8c00'; ctx.lineWidth = lw + 4; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); }
+    ctx.strokeStyle = col; ctx.lineWidth = lw;
     ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-    if (f!==null && Math.abs(f)>1e-6 && S.show.vec) {
+    if (f!==null && Math.abs(f)>1e-6 && S.show.vec && !a) {
       const L = Math.hypot(x2-x1,y2-y1); if (L>60) { const ux=(x2-x1)/L, uy=(y2-y1)/L, d=26;
         if (f>0) { arrow(x1+ux*10,y1+uy*10,x1+ux*(10+d),y1+uy*(10+d),col); arrow(x2-ux*10,y2-uy*10,x2-ux*(10+d),y2-uy*(10+d),col); }
         else { arrow(x1+ux*(10+d),y1+uy*(10+d),x1+ux*10,y1+uy*10,col,7,2,true); arrow(x2-ux*(10+d),y2-uy*(10+d),x2-ux*10,y2-uy*10,col,7,2,true); }
       }
     }
   });
-  if (R && S.show.mtext) S.members.forEach((m,i) => {
-    const [x1,y1] = toPx(...S.nodes[m[0]]), [x2,y2] = toPx(...S.nodes[m[1]]), f = R.member[i];
-    label(fmt(f,2), (x1+x2)/2, (y1+y2)/2, Math.abs(f)<1e-6 ? '#000' : f>0 ? '#00f' : '#f00', Math.abs(f)<1e-6 ? '#000' : f>0 ? '#00f' : '#f00');
+  if (R && S.show.mtext && !a) S.members.forEach((m,i) => {
+    const [x1,y1] = toPx(...S.nodes[m[0]]), [x2,y2] = toPx(...S.nodes[m[1]]), {f,col} = memberView(i,R);
+    label(fmt(f,2), (x1+x2)/2, (y1+y2)/2, col, col);
   });
   // supports
   S.supports.forEach(s => {
@@ -260,14 +319,14 @@ function draw() {
     arrow(x,y,x+ux*L,y+uy*L,'#000',8,2);
     if (S.show.ftext) label('('+fmt(f.fx,2)+', '+fmt(f.fy,2)+')', x+ux*(L+18), y+uy*(L+12), '#333');
   });
-  if (R) R.react.reduce((acc,r)=>{ (acc[r.n]=acc[r.n]||{n:r.n,x:0,y:0})[r.dir]=r.v; return acc; }, {}) && (()=>{
+  if (R) {
     const per = {}; R.react.forEach(r => { (per[r.n]=per[r.n]||{x:0,y:0})[r.dir]=r.v; });
     Object.keys(per).forEach(n => { const {x:rx,y:ry} = per[n], mag = Math.hypot(rx,ry); if (mag<1e-9) return;
       const [x,y] = toPx(...S.nodes[n]), L = Math.max(mag/S.arrowN*S.scale,12), ux=rx/mag, uy=-ry/mag;
       arrow(x,y,x+ux*L,y+uy*L,'green',8,2);
       if (S.show.ftext) label('('+fmt(rx,2)+', '+fmt(ry,2)+')', x+ux*(L+18), y+uy*(L+12), '#333');
     });
-  })();
+  }
   // nodes
   S.nodes.forEach((n,i) => {
     const [x,y] = toPx(...n);
@@ -275,38 +334,84 @@ function draw() {
     ctx.beginPath(); ctx.arc(x,y,7,0,7); ctx.fill(); ctx.stroke();
     if (S.show.ntext) { ctx.fillStyle = '#000'; ctx.font = '10px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(i,x,y+1); }
   });
-  if (S.sel && S.sel.type==='member') { const a = toPx(...S.nodes[S.sel.a]), b = toPx(...S.nodes[S.sel.b]); ctx.strokeStyle='rgba(0,0,0,.4)'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); ctx.setLineDash([]); }
-  if (tab==='balsa' && gov) { const a = toPx(...S.nodes[gov.m[0]]), b = toPx(...S.nodes[gov.m[1]]); label('weakest', (a[0]+b[0])/2, (a[1]+b[1])/2-18, '#ff8c00'); }
-  if (S.res && S.res.error) { ctx.fillStyle='#c00'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.fillText('Truss is unstable or statically indeterminate (cannot solve).', 8, 18); }
+  if (!S.exporting) {
+    ctx.strokeStyle = '#ff8c00'; ctx.lineWidth = 2;
+    if (tab==='design') {
+      S.selN.forEach(i => { if (!S.nodes[i]) return; const [x,y] = toPx(...S.nodes[i]); ctx.beginPath(); ctx.arc(x,y,11,0,7); ctx.stroke(); });
+      if (S.selM >= 0 && S.members[S.selM]) { const m = S.members[S.selM], p = toPx(...S.nodes[m[0]]), q = toPx(...S.nodes[m[1]]); ctx.setLineDash([5,3]); ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    if (S.sel && S.nodes[S.sel.n]) { const [x,y] = toPx(...S.nodes[S.sel.n]); ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.arc(x,y,12,0,7); ctx.stroke(); }
+    if (S.drag && S.drag.k==='box') { const d = S.drag; ctx.strokeStyle = '#ff8c00'; ctx.lineWidth = 1; ctx.setLineDash([4,3]); ctx.strokeRect(d.px, d.py, d.x1-d.px, d.y1-d.py); ctx.setLineDash([]); }
+  }
+  if (tab==='balsa' && gov && !a) { const p = toPx(...S.nodes[gov.m[0]]), q = toPx(...S.nodes[gov.m[1]]); label('weakest', (p[0]+q[0])/2, (p[1]+q[1])/2-18, '#ff8c00'); }
+  if (a) {                                    // load animation banner
+    const sc = R.balsa.scale, txt = a.done ? 'FAILED: member '+a.gov.m[0]+'-'+a.gov.m[1]+' ('+a.gov.mode+') at '+fmt(a.lam*sc,1)+' '+S.fu : 'Load: '+fmt(a.lam*sc,1)+' '+S.fu;
+    ctx.font = 'bold 15px Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const w = ctx.measureText(txt).width + 12; ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(6,6,w,24);
+    ctx.fillStyle = a.done ? '#b00000' : '#000'; ctx.fillText(txt, 12, 11);
+  }
+  if (S.res && S.res.error) { ctx.fillStyle='#c00'; ctx.font='bold 14px Arial'; ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.fillText('Truss is unstable or statically indeterminate (cannot solve).', 8, 18); }
 }
 
+/* ============ load-to-failure animation ============ */
+function startAnim() {
+  const R = S.res, bl = R && !R.error && R.balsa; if (!bl || !bl.gov) return;
+  S.anim = {t0:null, lam:0, max:bl.lam, gov:bl.gov, done:false}; requestAnimationFrame(animStep); render();
+}
+function animStep(ts) {
+  const a = S.anim; if (!a || a.done) return;
+  if (a.t0 === null) a.t0 = ts;
+  const p = Math.min((ts - a.t0)/4500, 1); a.lam = a.max*p; if (p >= 1) a.done = true;
+  draw(); if (!a.done) requestAnimationFrame(animStep);
+}
+function stopAnim() { S.anim = null; render(); }
+
 /* ============ tables ============ */
-function tbl(title, key, inner) {
-  return '<table class="data'+(S.show[key]?'':' hidden')+'" id="t_'+key+'"><tr><th colspan="9" style="text-align:left;padding:2px 4px">'+title+'<button class="minus" data-hide="'+key+'">&minus;</button></th></tr>'+inner+'</table>';
+function tbl(title, key, inner, cols) {
+  return '<table class="data'+(S.show[key]?'':' hidden')+'" id="t_'+key+'"><tr><th colspan="'+(cols||9)+'" style="text-align:left;padding:2px 4px">'+title+'<button class="minus" data-hide="'+key+'">&minus;</button></th></tr>'+inner+'</table>';
 }
 function buildTables() {
   const R = S.res && !S.res.error ? S.res : null;
   let n = '<tr><td class="hd">#</td><td class="hd">x ['+S.lu+']</td><td class="hd">y ['+S.lu+']</td></tr>';
   S.nodes.forEach((p,i) => n += '<tr><td>'+i+'</td><td><input type="number" step="any" data-nx="'+i+'" value="'+p[0]+'"></td><td><input type="number" step="any" data-ny="'+i+'" value="'+p[1]+'"></td></tr>');
   n += '<tr><td><button data-addnode style="font-size:11px" title="Add new node">+</button></td><td><input type="text" id="newx"></td><td><input type="text" id="newy"></td></tr>';
-  let m = '<tr><td class="hd">#</td><td class="hd">Nodes</td><td class="hd">Length ['+S.lu+']</td><td class="hd">Force ['+S.fu+']</td></tr>';
-  S.members.forEach((mm,i) => m += '<tr><td>'+i+'</td><td>'+mm[0]+'-'+mm[1]+'</td><td>'+fmt(len(mm),3)+'</td><td>'+(R?fmt(R.member[i]):'')+'</td></tr>');
+  let m = '<tr><td class="hd">#</td><td class="hd">Nodes</td><td class="hd">Length ['+S.lu+']</td><td class="hd">Force ['+S.fu+']</td><td class="hd" title="Double stacked (two sticks side by side)">2&times;</td></tr>';
+  S.members.forEach((mm,i) => m += '<tr><td>'+i+'</td><td>'+mm[0]+'-'+mm[1]+'</td><td>'+fmt(len(mm),3)+'</td><td>'+(R?fmt(R.member[i]):'')+'</td><td><input type="checkbox" data-dbl="'+i+'"'+(isDbl(mm)?' checked':'')+'></td></tr>');
   let f = '<tr><td class="hd">Node</td><td class="hd">Fx ['+S.fu+']</td><td class="hd">Fy ['+S.fu+']</td></tr>';
   S.forces.forEach((q,i) => f += '<tr><td>'+q.n+'</td><td><input type="number" step="any" data-fx="'+i+'" value="'+q.fx+'"></td><td><input type="number" step="any" data-fy="'+i+'" value="'+q.fy+'"></td></tr>');
   const per = {}; if (R) R.react.forEach(r => { (per[r.n]=per[r.n]||{x:0,y:0})[r.dir]=r.v; });
   S.supports.forEach(s => { const p = per[s.n]; const ax = s.type!=='hroll', ay = s.type!=='vroll';
     f += '<tr><td>'+s.n+'*</td><td>'+(R&&ax?fmt(p.x):(R?'0':''))+'</td><td>'+(R&&ay?fmt(p.y):(R?'0':''))+'</td></tr>'; });
   f += '<tr><td colspan="3">*Reaction forces at a support</td></tr>';
-  let h = tbl('Nodes','nodeList',n) + tbl('Members','memList',m) + tbl('External Forces','forceList',f);
-  if (R && R.balsa && S.tab==='balsa') {
-    let b = '<tr><td class="hd">Member</td><td class="hd">Force</td><td class="hd">Capacity</td><td class="hd">Fails by</td><td class="hd">Load &times;</td></tr>';
-    R.balsa.rows.forEach(r => { const cap = r.fl>=0?r.Tcap:r.Ccap; b += '<tr'+(R.balsa.gov&&R.balsa.gov.i===r.i?' style="background:#ffe0b0"':'')+'><td>'+r.m[0]+'-'+r.m[1]+'</td><td>'+fmt(r.fl,3)+'</td><td>'+fmt(cap,2)+'</td><td>'+r.mode+'</td><td>'+(isFinite(r.lam)?fmt(r.lam,2):'&infin;')+'</td></tr>'; });
-    h += '<table class="data" id="t_balsa"><tr><th colspan="5" style="text-align:left;padding:2px 4px">Balsa Wood Check ['+S.fu+']</th></tr>'+b+'</table>';
-  }
+  let h = tbl('Nodes','nodeList',n,3) + tbl('Members','memList',m,5) + tbl('External Forces','forceList',f,3);
+  if (R && R.balsa && S.tab==='balsa') h += balsaTables(R.balsa);
   $('tables').innerHTML = h;
 }
+function balsaTables(bl) {
+  const small = (title, cols, rows) => '<table class="data"><tr><th colspan="'+cols+'" style="text-align:left;padding:2px 4px">'+title+'</th></tr>'+rows+'</table>';
+  const hd = a => '<tr>'+a.map(t=>'<td class="hd">'+t+'</td>').join('')+'</tr>';
+  // per-member check
+  let b = hd(['Member','Force','Capacity','Fails by','Load &times;']);
+  bl.rows.forEach(r => { const cap = r.fl>=0?r.Tcap:r.Ccap; b += '<tr'+(bl.gov&&bl.gov.i===r.i?' style="background:#ffe0b0"':'')+'><td>'+r.m[0]+'-'+r.m[1]+(isDbl(r.m)?' (2&times;)':'')+'</td><td>'+fmt(r.fl,3)+'</td><td>'+fmt(cap,2)+'</td><td>'+r.mode+'</td><td>'+(isFinite(r.lam)?fmt(r.lam,2):'&infin;')+'</td></tr>'; });
+  let h = small('Balsa Wood Check ['+S.fu+']', 5, b);
+  // where to put the load
+  const pt = placementTable(), fin = pt.filter(r => r.fail !== null && isFinite(r.fail)), worst = fin.reduce((a,r) => !a || r.fail < a.fail ? r : a, null), best = fin.reduce((a,r) => !a || r.fail > a.fail ? r : a, null);
+  let p = hd(['Node','Position','Failure load ['+S.fu+']','Weakest member']);
+  pt.forEach(r => { const st = worst && r===worst ? ' style="background:#ffb0b0"' : best && r===best ? ' style="background:#b8f0b8"' : '';
+    p += '<tr'+st+'><td>'+r.i+'</td><td>('+fmt(r.p[0],2)+', '+fmt(r.p[1],2)+')</td><td>'+(r.fail===null?'n/a':isFinite(r.fail)?fmt(r.fail,1):'&infin;')+'</td><td>'+(r.gov?r.gov.m[0]+'-'+r.gov.m[1]:'-')+'</td></tr>'; });
+  h += small('Where to put the load (single downward load)', 4, p + '<tr><td colspan="4" style="font-size:12px">red = weakest spot, green = strongest spot</td></tr>');
+  // cut list / parts
+  const groups = {}; let sticks = 0, total = 0;
+  S.members.forEach(m => { const key = fmt(len(m),2), g = groups[key] = groups[key] || {len:len(m), members:0, sticks:0}; g.members++; const k = isDbl(m)?2:1; g.sticks += k; sticks += k; total += k*len(m); });
+  let c = hd(['Length ['+S.lu+']','Members','Sticks to cut']);
+  Object.values(groups).sort((a,b) => b.len - a.len).forEach(g => c += '<tr><td>'+fmt(g.len,2)+'</td><td>'+g.members+'</td><td>'+g.sticks+'</td></tr>');
+  c += '<tr><td><b>Total</b></td><td>'+S.members.length+'</td><td><b>'+sticks+'</b></td></tr>'
+     + '<tr><td colspan="3" style="text-align:left;font-size:13px">Stick size '+fmt(B.b,2)+' &times; '+fmt(B.t,2)+' mm<br>Balsa needed: '+fmt(total,1)+' '+S.lu+' of stick<br>Truss weight: '+fmt(bl.mass*1000,1)+' g</td></tr>';
+  h += small('Parts list (cut list)', 3, c);
+  return h;
+}
 function buildMatrix() {
-  const el = $('matrix'); el.classList.toggle('hidden', !S.matrix || !S.res || S.res.error || S.tab!=='solve' && false);
+  const el = $('matrix'); el.classList.toggle('hidden', !S.matrix || !S.res || S.res.error);
   if (!S.matrix || !S.res || S.res.error) { el.innerHTML=''; return; }
   const {A,F,labels} = S.res.sys, x = S.res.x, n = S.nodes.length;
   let h = '<table><tr><td class="lbl"></td>'+labels.map(l=>'<td class="lbl" style="color:green;border:none">'+l+'</td>').join('')+'<td class="lbl"></td><td class="lbl"></td><td class="lbl"></td><td class="lbl" style="color:red">F</td></tr>';
@@ -320,23 +425,30 @@ function buildMatrix() {
 
 /* ============ menus ============ */
 const SUBS = {
-  design: [['Add','add'],['Delete','delete'],['Move','move'],['Show / Hide','showhide']],
-  io: [['Pre-built truss','pre'],['Download bridge','save'],['Upload bridge','load']],
+  design: [['Add','add'],['Delete','delete'],['Move','move'],['Stack','stack'],['Show / Hide','showhide']],
+  io: [['Pre-built truss','pre'],['Download bridge','save'],['Upload bridge','load'],['Export image (PNG)','png']],
   solve: [], dims: [['Physical Dimensions','phys'],['Window Size','win'],['Zoom / Pan / Extend','zoom'],['Show / Hide Labels','labels']],
   balsa: [], help: []
 };
 const LEAF = {
   add: [['Node ⚪','node'],['Member ⚊','member'],['Force','force'],['Support (Pin)','pin'],['Support (Horiz. Roll)','hroll'],['Support (Vert. Roll)','vroll']],
-  delete: [['Single','single'],['All','all']],
+  delete: [['Single','single'],['Force','dforce'],['Support','dsup'],['All','all']],
   move: [['Node','mnode'],['Force','mforce']],
+  stack: [['Double stack (click member)','dbl'],['Single (click member)','sgl'],['All double','alldbl'],['All single','allsgl']],
   showhide: [['Node List','nodeList'],['Member List','memList'],['Force List','forceList']]
 };
+const HINT = {
+  node:'Click the grid to add a node.', member:'Click two spots or nodes to connect them. Blank space creates a node there.', force:'Click a node (or blank space) to put a load there.',
+  pin:'Click a node, or blank space for a new one, to make it a pin support.', hroll:'Click a node, or blank space, to make it a horizontal roller.', vroll:'Click a node, or blank space, to make it a vertical roller.',
+  single:'Click a node, a member or a force arrow tip to delete it.', dforce:'Click a force arrow tip (or a node to clear its forces).', dsup:'Click a node to remove its support.',
+  mnode:'Drag a node.', mforce:'Drag the tip of a force arrow.', dbl:'Click members to double stack them (shown bold).', sgl:'Click members to make them single sticks again.'
+};
 let sub2 = null;
+const colorBtn = () => '<button class="Submenu" data-colormode>Color view: '+(S.colorMode==='tc'?'Tension / Compression':'Stress level')+' (click to switch)</button>';
 function render() {
-  document.querySelectorAll('.Menu').forEach(b => {});
   let h = '';
-  const subs = SUBS[S.tab] || [];
-  subs.forEach(([t,k]) => h += '<button class="'+(sub2===k?'Menu2':(sub2?'Menu2Mute':'Menu2'))+'" data-sub="'+k+'">'+t+'</button> ');
+  (SUBS[S.tab] || []).forEach(([t,k]) => h += '<button class="'+(sub2===k?'Menu2':(sub2?'Menu2Mute':'Menu2'))+'" data-sub="'+k+'">'+t+'</button> ');
+  if (S.tab==='design') h += '<span style="display:inline-block;width:14px"></span><button class="Menu2'+(H.undo.length?'':' off')+'" data-undo title="Undo (Ctrl+Z)">&#8630; Undo</button> <button class="Menu2'+(H.redo.length?'':' off')+'" data-redo title="Redo (Ctrl+Y)">Redo &#8631;</button>';
   $('sub').innerHTML = h;
   let extra = '';
   if (S.tab==='design' && LEAF[sub2]) {
@@ -344,27 +456,71 @@ function render() {
       const sel = (sub2==='showhide') ? S.show[k] : S.mode===k;
       return '<button class="Submenu'+(sel?' on':'')+'" data-leaf="'+k+'">'+t+'</button>';
     }).join(' ');
+    if (HINT[S.mode]) extra += ' <span style="font-family:Arial;font-size:12px">'+HINT[S.mode]+'</span>';
   }
   const infoParts = [];
-  if (S.tab==='solve') infoParts.push('<span class="compress">Compression (red,negative)</span>. <span class="tension">Tension (blue,positive)</span>. <span class="react">Reaction forces (green)</span>.<br>Show matrix at bottom of page: <button class="Submenu" data-matrix>on/off</button>');
+  if (S.tab==='design' && !sub2) infoParts.push('<span style="font-family:Arial;font-size:12px">Drag nodes to move them. Drag on empty space to box-select several, then drag or press Delete. Ctrl+Z / Ctrl+Y to undo / redo.</span>');
+  if (S.tab==='solve') infoParts.push('<span class="compress">Compression (red,negative)</span>. <span class="tension">Tension (blue,positive)</span>. <span class="react">Reaction forces (green)</span>.<br>Show matrix at bottom of page: <button class="Submenu" data-matrix>on/off</button> &nbsp; '+colorBtn());
   if (S.tab==='io') {
     if (sub2==='pre') infoParts.push('<b>Pre-built Truss:</b> '+[1,2,3,4].map(i=>'<button class="Submenu" data-pre="'+i+'">'+i+'</button>').join(' '));
     if (sub2==='save') infoParts.push('<b>Download your bridge to this computer:</b> <input type="text" id="fname" value="my-bridge" style="font-family:Arial;font-size:13px"> .json <button class="Submenu" data-dl>Download</button>');
     if (sub2==='load') infoParts.push('<b>Upload a bridge file you downloaded earlier (.json):</b> <input type="file" id="fload" accept=".json,application/json"><span id="loadMsg"></span>');
+    if (sub2==='png') infoParts.push('<b>Save a picture of the canvas:</b> <input type="text" id="pname" value="my-bridge" style="font-family:Arial;font-size:13px"> .png <button class="Submenu" data-png>Download</button>');
   }
   if (S.tab==='dims') {
     const V = (k,v) => '<button class="Variable" data-var="'+k+'">'+v+'</button>';
     if (sub2==='phys') infoParts.push('The units of length for this simulation are '+V('lu',S.lu)+' and units of force are '+V('fu',S.fu)+'.<br>The current workspace has a width of '+V('W',fmt(cv.width/S.scale,2)+' '+S.lu)+' and a height of '+V('H',fmt(cv.height/S.scale,2)+' '+S.lu)+'.<br>There is a snap grid with a spacing of '+V('snapX',S.snapX+' '+S.lu)+' in the x-direction and '+V('snapY',S.snapY+' '+S.lu)+' in the y-direction.<br>An arrow with length 1 '+S.lu+' represents a force of '+V('arrowN',S.arrowN+' '+S.fu)+'.');
     if (sub2==='win') infoParts.push('<b>Window:</b> <input type="number" class="inputDim" id="winW" value="'+cv.width+'"> by <input type="number" class="inputDim" id="winH" value="'+cv.height+'"> pixels');
     if (sub2==='zoom') infoParts.push('Zoom: <button class="Submenu" data-z="in">in</button> <button class="Submenu" data-z="out">out</button> &nbsp; Pan: <button class="Submenu" data-z="pl">◄</button> <button class="Submenu" data-z="pr">►</button> <button class="Submenu" data-z="pu">▲</button> <button class="Submenu" data-z="pd">▼</button> &nbsp; &nbsp; Extend/shrink: <button class="Submenu" data-z="el">◄</button> <button class="Submenu" data-z="er">►</button> <button class="Submenu" data-z="eu">▲</button> <button class="Submenu" data-z="ed">▼</button> &nbsp; &nbsp; <button class="Submenu" data-z="axes">Move axes</button> &nbsp; <button class="Submenu" data-z="fit">Zoom to fit</button>');
-    if (sub2==='labels') infoParts.push('Member forces: <button class="Submenu" data-lab="vec">Vectors</button> <button class="Submenu" data-lab="mtext">Text</button> Ext forces: <button class="Submenu" data-lab="ftext">Text</button> Node labels: <button class="Submenu" data-lab="ntext">Text</button>');
+    if (sub2==='labels') infoParts.push('Member forces: <button class="Submenu" data-lab="vec">Vectors</button> <button class="Submenu" data-lab="mtext">Text</button> Ext forces: <button class="Submenu" data-lab="ftext">Text</button> Node labels: <button class="Submenu" data-lab="ntext">Text</button> &nbsp; '+colorBtn());
   }
   if (S.tab==='balsa') infoParts.push(balsaPanel());
+  if (S.tab==='help') infoParts.push(helpText());
   $('info').innerHTML = (extra ? '<div>'+extra+'</div>' : '') + infoParts.join('<br>');
-  document.querySelectorAll('.Menu').forEach(b => b.style.background = b.dataset.tab===S.tab ? 'rgb(0,0,255)' : 'rgb(0,0,255)');
   if (S.tab==='io' && $('fload')) $('fload').onchange = loadFile;
   buildTables(); buildMatrix(); draw();
 }
+function guideHtml() {
+  return '<h3>Building</h3><ul>'
+    + '<li><b>Supports on blank space:</b> with Add &gt; Support (Pin / Horiz. Roll / Vert. Roll), click a node to turn it into a support, or click empty grid to create a new node there as a support.</li>'
+    + '<li><b>Members and forces on blank space:</b> Add &gt; Member and Add &gt; Force also work on empty grid. Clicking blank space creates a node there first.</li>'
+    + '<li><b>Snap grid:</b> everything you place snaps to the grid. Change the spacing in Display &amp; Dimensions &gt; Physical Dimensions.</li>'
+    + '<li><b>Esc</b> cancels the current tool, selection or a half-drawn member.</li></ul>'
+    + '<h3>Moving and selecting (Design tab)</h3><ul>'
+    + '<li><b>Drag a node</b> to move it. Drag the tip of a force arrow to change that force.</li>'
+    + '<li><b>Box select:</b> drag on empty space to select several nodes (orange rings), then drag them together. <kbd>Shift</kbd>+click adds or removes a node. Click a member to select it.</li>'
+    + '<li><b>Delete / Backspace</b> removes the selected nodes (and the members attached) or the selected member.</li></ul>'
+    + '<h3>Delete options</h3><ul>'
+    + '<li>Delete &gt; <b>Single</b> removes a node, member or force arrow tip. <b>Force</b> removes forces. <b>Support</b> removes just the support and keeps the node. <b>All</b> clears everything (Ctrl+Z brings it back).</li></ul>'
+    + '<h3>Undo / redo</h3><ul>'
+    + '<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo, <kbd>Ctrl</kbd>+<kbd>Y</kbd> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>) redo, or the Undo / Redo buttons next to Show / Hide. A drag or slider slide counts as one step. Up to 200 steps.</li></ul>'
+    + '<h3>Stacking sticks</h3><ul>'
+    + '<li>Design &gt; <b>Stack</b>: click members to double stack them (two sticks side by side, drawn bold, 3 &times; 3 mm becomes 3 &times; 6 mm). It doubles strength and weight. You can also tick the <b>2&times;</b> box in the Members table, or use All double / All single.</li></ul>'
+    + '<h3>Colors</h3><ul>'
+    + '<li><b>Color view</b> button (Solve, Balsa Wood and Show / Hide Labels): switches between the original <span style="color:#00f">blue tension</span> / <span style="color:#f00">red compression</span> view and a <span style="color:#2a9d2a">green</span> to <span style="color:#c00">red</span> stress view (how close each member is to failing).</li></ul>'
+    + '<h3>Balsa Wood tab</h3><ul>'
+    + '<li><b>Stick properties</b> (width, thickness, strength, density, glue factor) update the failure load live.</li>'
+    + '<li><b>Test load slider:</b> scales all your loads together and shows if the bridge still holds. Drag it to find the breaking point.</li>'
+    + '<li><b>Animate load test:</b> ramps the load up until the first member breaks, then shows the broken member and the failure load.</li>'
+    + '<li><b>Where to put the load:</b> a table of the failure load for a single weight placed at each node. Red = weakest spot, green = strongest.</li>'
+    + '<li><b>Parts list:</b> cut list of stick lengths and counts (double stacked members count as two sticks), total length and weight.</li>'
+    + '<li>The failure load is an upper bound: bending and glue joint failure are not modeled.</li></ul>'
+    + '<h3>Saving</h3><ul>'
+    + '<li><b>Autosave:</b> your bridge and balsa settings are saved in this browser automatically and come back when you reopen the page. Delete &gt; All then starts a blank one.</li>'
+    + '<li>Import &amp; Export: <b>Download bridge</b> saves a .json file, <b>Upload bridge</b> loads one back, <b>Export image</b> saves the canvas as a .png.</li></ul>'
+    + '<h3>Other</h3><ul>'
+    + '<li><b>Dark mode</b> changes only the page text and background, not the grid or blue buttons. It is remembered.</li>'
+    + '<li>Display &amp; Dimensions: units, window size, zoom / pan, label toggles. Solve &gt; on/off shows the equation matrix.</li></ul>';
+}
+function helpText() { return '<div style="font-family:Arial;font-size:13px">Open the <b>&#9776; Guide</b> menu in the top right corner for a guide to every feature.</div>'; }
+function toggleGuide(show) {
+  const g = $('guide'); if (show === undefined) show = g.classList.contains('hidden');
+  if (show) g.innerHTML = guideHtml();
+  g.classList.toggle('hidden', !show); $('guideBtn').setAttribute('aria-expanded', show);
+}
+$('guideBtn').onclick = e => { e.stopPropagation(); toggleGuide(); };
+document.addEventListener('mousedown', e => { if (!$('guide').classList.contains('hidden') && !$('guide').contains(e.target) && e.target !== $('guideBtn')) toggleGuide(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleGuide(false); });
 function balsaPanel() {
   const P = (id,lab,val,unit,step) => '<tr><td>'+lab+'</td><td><input type="number" step="'+(step||'any')+'" class="inputDim" style="width:70px" data-b="'+id+'" value="'+val+'"></td><td>'+unit+'</td></tr>';
   let h = '<div id="balsa"><b>Balsa wood properties</b> (defaults: typical medium-density balsa; edit to match your sticks)<table>'
@@ -373,83 +529,148 @@ function balsaPanel() {
     + P('st','Tensile strength (along grain)',B.st,'MPa') + P('sc','Compressive strength (along grain)',B.sc,'MPa')
     + P('K','Buckling end factor K (1 = pinned ends)',B.K,'') + P('factor','Strength factor (glue joints, defects, moisture)',B.factor,'(0-1)')
     + '<tr><td>Include weight of the balsa itself</td><td><input type="checkbox" data-b="selfw" '+(B.selfw?'checked':'')+'></td><td></td></tr></table>';
-  const R = S.res;
-  if (!R) h += '<div id="balsaOut">Add nodes, members and supports to solve.</div>';
-  else if (R.error) h += '<div id="balsaOut" class="bad">Truss cannot be solved (unstable or indeterminate).</div>';
+  h += balsaOutHtml() + loadTestHtml();
+  return h + '<div style="font-size:12px;max-width:600px">Model: pin-jointed truss, axial forces only. Tension limit = &sigma;t&middot;A&middot;factor. Compression limit = min(&sigma;c&middot;A&middot;factor, Euler &pi;²EI/(KL)²) using the weak axis of the stick. A double stacked member counts as one stick of width &times; 2&times;thickness. Bending, joint glue shear and stick defects are not modeled, so treat the result as an upper bound and test your real bridge. Lengths are read in '+S.lu+'; forces assumed in N.</div></div>';
+}
+function balsaOutHtml() {
+  const R = S.res; let h;
+  if (!R) h = '<div id="balsaOut">Add nodes, members and supports to solve.</div>';
+  else if (R.error) h = '<div id="balsaOut" class="bad">Truss cannot be solved (unstable or indeterminate).</div>';
   else if (R.balsa) {
     const bl = R.balsa, g = bl.gov, u = S.fu;
-    if (!g) h += '<div id="balsaOut">No member is loaded. Apply a force.</div>';
+    if (!g) h = '<div id="balsaOut">No member is loaded. Apply a force.</div>';
     else {
-      const total = bl.lam*bl.Wapp;
-      h += '<div id="balsaOut">Applied load right now: <b>'+fmt(bl.Wapp,2)+' '+u+'</b> &rarr; '
+      const total = bl.lam*bl.scale;
+      h = '<div id="balsaOut">Applied load right now: <b>'+fmt(bl.scale,2)+' '+u+'</b> &rarr; '
         + (bl.lam>=1 ? '<span class="good">holds</span>' : '<span class="bad">FAILS</span>')+'.<br>'
-        + 'Weakest member: <b>'+g.m[0]+'-'+g.m[1]+'</b> ('+g.mode+'), length '+fmt(g.L*100,1)+' cm.<br>'
+        + 'Weakest member: <b>'+g.m[0]+'-'+g.m[1]+'</b> ('+g.mode+'), length '+fmt(g.L*100,1)+' cm'+(isDbl(g.m)?', double stacked':'')+'.<br>'
         + 'Estimated failure load: <b>'+fmt(total,2)+' '+u+'</b> (load factor &times;'+fmt(bl.lam,2)+')'
         + (u==='N' ? ' &asymp; <b>'+fmt(total/9.81*1000,0)+' g</b> hanging mass' : '')+'.<br>'
         + 'Truss balsa weight: '+fmt(bl.mass*1000,1)+' g'+(B.selfw?' (included)':' (ignored)')+'.</div>';
     }
-  }
-  return h + '<div style="font-size:12px;max-width:600px">Model: pin-jointed truss, axial forces only. Tension limit = &sigma;t&middot;A&middot;factor. Compression limit = min(&sigma;c&middot;A&middot;factor, Euler &pi;²EI/(KL)²) using the weak axis of the stick. Bending, joint glue shear and stick defects are not modeled, so treat the result as an upper bound and test your real bridge. Lengths are read in '+S.lu+'; forces assumed in N.</div></div>';
+  } else h = '<div id="balsaOut"></div>';
+  return h;
+}
+function loadTestHtml() {
+  const R = S.res, bl = R && !R.error && R.balsa, ok = bl && bl.scale > 0 && bl.gov;
+  const max = ok ? (isFinite(bl.lam) ? Math.max(bl.lam*bl.scale*1.5, bl.scale*2) : bl.scale*5) : 100;
+  return '<div id="loadTest"><b>Test load:</b> <input type="range" id="loadSlider" min="0" max="'+fmt(max,2)+'" step="any" value="'+(ok?bl.scale:0)+'"'+(ok?'':' disabled')+'> <span id="sliderVal">'+(ok?fmt(bl.scale,2):'0')+'</span> '+S.fu
+    + ' &nbsp; <button class="Submenu" data-anim'+(ok?'':' disabled')+'>'+(S.anim && !S.anim.done ? '&#9632; Stop' : S.anim ? '&#8635; Replay' : '&#9654; Animate load test')+'</button> '+(S.anim ? '<button class="Submenu" data-animstop>Reset</button> ' : '')+colorBtn()
+    + '<div style="font-size:12px">Drag the slider to scale the applied load and watch the failure result update. The animation ramps the load up until the first member breaks.</div></div>';
 }
 
-/* ============ events ============ */
-function fresh() { solve(); render(); }
-document.querySelectorAll('.Menu').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; sub2 = null; S.mode = null; render(); });
-document.addEventListener('click', e => {
-  const t = e.target;
-  if (t.dataset.sub) { sub2 = sub2===t.dataset.sub ? sub2 : t.dataset.sub; if (S.tab==='io' && t.dataset.sub==='load') { render(); } S.mode = null; if (t.dataset.sub==='save'||t.dataset.sub==='load'||t.dataset.sub==='pre') {} render(); }
-  else if (t.dataset.leaf) { const k = t.dataset.leaf;
-    if (sub2==='showhide') { S.show[k] = !S.show[k]; }
-    else if (k==='all') { S.nodes=[]; S.members=[]; S.forces=[]; S.supports=[]; S.res=null; fresh(); return; }
-    else S.mode = k;
-    render(); }
-  else if (t.dataset.hide) { S.show[t.dataset.hide] = false; render(); }
-  else if (t.dataset.matrix !== undefined) { S.matrix = !S.matrix; render(); }
-  else if (t.dataset.pre) { const p = PRE[t.dataset.pre]; const d = p || {nodes:[[-9,0],[9,0],[0,3],[0,0],[-7,3],[-5,0],[-3,3],[-1,0],[1,0],[3,3],[5,0],[7,3]], members:[[0,5],[3,8],[3,7],[5,7],[1,10],[8,10],[9,11],[2,9],[4,6],[2,6],[0,4],[1,11],[10,11],[8,9],[9,10],[2,8],[2,7],[6,7],[5,6],[4,5],[2,3]], forces:[{n:2,fx:0,fy:-10}], supports:[{n:0,type:'pin'},{n:1,type:'hroll'}]};
-    S.nodes=JSON.parse(JSON.stringify(d.nodes)); S.members=JSON.parse(JSON.stringify(d.members)); S.forces=JSON.parse(JSON.stringify(d.forces)); S.supports=JSON.parse(JSON.stringify(d.supports)); S.res=null; S.matrix=false; fresh(); }
-  else if (t.dataset.dl !== undefined) { const name = ($('fname').value.trim().replace(/\.json$/i,'').replace(/[\\/:*?"<>|]/g,'') || 'my-bridge') + '.json'; const blob = new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B})],{type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
-  else if (t.dataset.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { S.nodes.push([x,y]); fresh(); } }
-  else if (t.dataset.z) zoomCmd(t.dataset.z);
-  else if (t.dataset.lab) { S.show[t.dataset.lab] = !S.show[t.dataset.lab]; draw(); }
-  else if (t.dataset.var) editVar(t);
-});
-document.addEventListener('input', e => {
-  const t = e.target, d = t.dataset;
-  if (d.nx!==undefined) S.nodes[d.nx][0] = parseFloat(t.value)||0;
-  else if (d.ny!==undefined) S.nodes[d.ny][1] = parseFloat(t.value)||0;
-  else if (d.fx!==undefined) S.forces[d.fx].fx = parseFloat(t.value)||0;
-  else if (d.fy!==undefined) S.forces[d.fy].fy = parseFloat(t.value)||0;
-  else if (d.b!==undefined) { B[d.b] = t.type==='checkbox' ? t.checked : (parseFloat(t.value)||0); solve(); refreshBalsa(); return; }
-  else if (t.id==='winW'||t.id==='winH') { cv.width = parseInt($('winW').value)||607; cv.height = parseInt($('winH').value)||275; draw(); return; }
-  else return;
-  solve(); refreshLive();
-});
-function refreshLive() { buildTables(); buildMatrix(); draw(); rebuildInputsKeepFocus(); }
-function rebuildInputsKeepFocus() {}
-function refreshBalsa() { const keep = document.activeElement; const key = keep && keep.dataset ? keep.dataset.b : null; const pos = keep && keep.selectionStart;
-  // update only outputs so typing is not interrupted
-  const tmp = document.createElement('div'); tmp.innerHTML = balsaPanel();
-  const out = tmp.querySelector('#balsaOut'), cur = $('balsaOut'); if (out && cur) cur.outerHTML = out.outerHTML;
-  const expl = tmp.lastElementChild; buildTables(); draw(); }
+/* ============ history: undo / redo + autosave ============ */
+const H = { undo: [], redo: [], cur: null };
+const SAVE_KEY = 'truss-autosave-v2';
+const snapDesign = () => JSON.stringify({n:S.nodes, m:S.members, f:S.forces, s:S.supports});
+function autosave() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({nodes:S.nodes, members:S.members, forces:S.forces, supports:S.supports, balsa:B, colorMode:S.colorMode})); } catch (e) {}
+}
+function commit() {
+  if (S.drag) return;                       // a drag counts as one step, committed on mouse release
+  const s = snapDesign(); if (s === H.cur) return;
+  if (H.cur !== null) { H.undo.push(H.cur); if (H.undo.length > 200) H.undo.shift(); }
+  H.cur = s; H.redo = []; autosave();
+}
+function restore(s) {
+  const d = JSON.parse(s); S.nodes = d.n; S.members = d.m; S.forces = d.f; S.supports = d.s;
+  H.cur = s; S.res = null; S.sel = null; S.selN = []; S.selM = -1; solve(); autosave(); render();
+}
+function undo() { if (!H.undo.length) return; H.redo.push(H.cur); restore(H.undo.pop()); }
+function redo() { if (!H.redo.length) return; H.undo.push(H.cur); restore(H.redo.pop()); }
+
+/* ============ loading / validating a design ============ */
+function validDesign(d) {
+  try {
+    const n = d.nodes.length;
+    return Array.isArray(d.members) && Array.isArray(d.forces) && Array.isArray(d.supports)
+      && d.nodes.every(p => p.length===2 && isFinite(p[0]) && isFinite(p[1]))
+      && d.members.every(m => m[0]>=0 && m[0]<n && m[1]>=0 && m[1]<n && (m[2]===undefined || m[2]===0 || m[2]===1))
+      && d.forces.every(q => q.n>=0 && q.n<n && isFinite(q.fx) && isFinite(q.fy))
+      && d.supports.every(s => s.n>=0 && s.n<n && ['pin','hroll','vroll'].includes(s.type));
+  } catch (e) { return false; }
+}
+function applyDesign(d) {
+  S.nodes = clone(d.nodes); S.members = clone(d.members); S.forces = clone(d.forces); S.supports = clone(d.supports);
+  if (d.balsa) Object.keys(B).forEach(k => { if (typeof d.balsa[k] === typeof B[k]) B[k] = d.balsa[k]; });
+  if (d.colorMode === 'tc' || d.colorMode === 'stress') S.colorMode = d.colorMode;
+  S.res = null; S.sel = null; S.selN = []; S.selM = -1; S.matrix = false;
+}
 function loadFile(e) {
   const f = e.target.files[0]; if (!f) return;
   const msg = t => { const m = $('loadMsg'); if (m) m.textContent = ' ' + t; };
   const r = new FileReader();
   r.onload = () => {
     try {
-      const d = JSON.parse(r.result), n = d.nodes.length;
-      const ok = Array.isArray(d.members) && Array.isArray(d.forces) && Array.isArray(d.supports)
-        && d.nodes.every(p => p.length===2 && isFinite(p[0]) && isFinite(p[1]))
-        && d.members.every(m => m[0]>=0 && m[0]<n && m[1]>=0 && m[1]<n)
-        && d.forces.every(q => q.n>=0 && q.n<n) && d.supports.every(s => s.n>=0 && s.n<n && ['pin','hroll','vroll'].includes(s.type));
-      if (!ok) throw 0;
-      S.nodes = d.nodes; S.members = d.members; S.forces = d.forces; S.supports = d.supports;
-      if (d.balsa) Object.assign(B, d.balsa);
-      S.res = null; S.sel = null; solve(); render();
+      const d = JSON.parse(r.result); if (!validDesign(d)) throw 0;
+      applyDesign(d); solve(); render();
       msg('Loaded "' + f.name + '".');
     } catch (err) { msg('Could not read "' + f.name + '" (not a bridge file saved from this simulator).'); }
   };
   r.readAsText(f);
+}
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+const safeName = (id, ext) => (($(id).value || '').trim().replace(new RegExp('\\.'+ext+'$','i'),'').replace(/[\\/:*?"<>|]/g,'') || 'my-bridge') + '.' + ext;
+
+/* ============ events ============ */
+function fresh() { solve(); render(); }
+document.querySelectorAll('.Menu').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; sub2 = null; S.mode = null; S.sel = null; S.anim = null; render(); });
+document.addEventListener('click', e => {
+  const t = e.target.closest ? (e.target.closest('button,input') || e.target) : e.target, d = t.dataset;
+  if (d.sub) { sub2 = d.sub; S.mode = null; S.sel = null; render(); }
+  else if (d.leaf) { const k = d.leaf;
+    if (sub2==='showhide') S.show[k] = !S.show[k];
+    else if (k==='all') { S.nodes=[]; S.members=[]; S.forces=[]; S.supports=[]; S.res=null; S.selN=[]; S.selM=-1; fresh(); return; }
+    else if (k==='alldbl' || k==='allsgl') { S.members.forEach(m => { m[2] = k==='alldbl' ? 1 : 0; }); fresh(); return; }
+    else { S.mode = k; S.sel = null; }
+    render(); }
+  else if (d.undo !== undefined) undo();
+  else if (d.redo !== undefined) redo();
+  else if (d.hide) { S.show[d.hide] = false; render(); }
+  else if (d.matrix !== undefined) { S.matrix = !S.matrix; render(); }
+  else if (d.colormode !== undefined) { S.colorMode = S.colorMode==='tc' ? 'stress' : 'tc'; autosave(); render(); }
+  else if (d.anim !== undefined) startAnim();
+  else if (d.animstop !== undefined) stopAnim();
+  else if (d.pre) { applyDesign(PRE[d.pre]); fresh(); }
+  else if (d.dl !== undefined) download(new Blob([JSON.stringify({nodes:S.nodes,members:S.members,forces:S.forces,supports:S.supports,balsa:B})],{type:'application/json'}), safeName('fname','json'));
+  else if (d.png !== undefined) { S.exporting = true; draw(); const name = safeName('pname','png'); cv.toBlob(b => download(b, name)); S.exporting = false; draw(); }
+  else if (d.addnode !== undefined) { const x = parseFloat($('newx').value), y = parseFloat($('newy').value); if (!isNaN(x)&&!isNaN(y)) { S.nodes.push([x,y]); fresh(); } }
+  else if (d.z) zoomCmd(d.z);
+  else if (d.lab) { S.show[d.lab] = !S.show[d.lab]; draw(); }
+  else if (d.var) editVar(t);
+});
+let sliderBase = null;
+document.addEventListener('input', e => {
+  const t = e.target, d = t.dataset;
+  if (t.id==='loadSlider') {                                  // scale all applied loads to the slider value
+    if (!sliderBase) { const sc = S.res && S.res.balsa ? S.res.balsa.scale : 0; sliderBase = {sc, forces: clone(S.forces)}; }
+    if (sliderBase.sc > 0) {
+      const r = parseFloat(t.value) / sliderBase.sc;
+      S.forces = sliderBase.forces.map(f => ({...f, fx: +(f.fx*r).toFixed(4), fy: +(f.fy*r).toFixed(4)}));
+      S.drag = {k:'slider'}; solve(); S.drag = null; sliderDone = false;
+      $('sliderVal').textContent = fmt(parseFloat(t.value),2); refreshBalsa();
+    }
+    return;
+  }
+  if (d.nx!==undefined) S.nodes[d.nx][0] = parseFloat(t.value)||0;
+  else if (d.ny!==undefined) S.nodes[d.ny][1] = parseFloat(t.value)||0;
+  else if (d.fx!==undefined) S.forces[d.fx].fx = parseFloat(t.value)||0;
+  else if (d.fy!==undefined) S.forces[d.fy].fy = parseFloat(t.value)||0;
+  else if (d.b!==undefined) { B[d.b] = t.type==='checkbox' ? t.checked : (parseFloat(t.value)||0); solve(); autosave(); refreshBalsa(); return; }
+  else if (t.id==='winW'||t.id==='winH') { cv.width = parseInt($('winW').value)||607; cv.height = parseInt($('winH').value)||275; draw(); return; }
+  else return;
+  solve(); refreshLive();
+});
+let sliderDone = true;
+document.addEventListener('change', e => {
+  const t = e.target, d = t.dataset;
+  if (t.id==='loadSlider') { sliderBase = null; commit(); render(); }       // one undo step for the whole slide
+  else if (d.dbl !== undefined) { S.members[d.dbl][2] = t.checked ? 1 : 0; fresh(); }
+});
+function refreshLive() { buildTables(); buildMatrix(); draw(); }
+function refreshBalsa() {            // update only outputs so typing / sliding is not interrupted
+  const cur = $('balsaOut'); if (cur) cur.outerHTML = balsaOutHtml();
+  buildTables(); draw();
 }
 function editVar(btn) {
   const k = btn.dataset.var, inp = document.createElement('input'); inp.className='inputDim';
@@ -470,61 +691,96 @@ function zoomCmd(z) {
   render();
 }
 
-/* canvas interaction */
+/* ============ canvas interaction ============ */
 function pos(e) { const r = cv.getBoundingClientRect(); return [e.clientX-r.left-1, e.clientY-r.top-1]; }
 function hitNode(px,py) { for (let i=S.nodes.length-1;i>=0;i--) { const [x,y] = toPx(...S.nodes[i]); if (Math.hypot(x-px,y-py) < 10) return i; } return -1; }
 function hitMember(px,py) { for (let i=0;i<S.members.length;i++) { const [x1,y1]=toPx(...S.nodes[S.members[i][0]]),[x2,y2]=toPx(...S.nodes[S.members[i][1]]); const L2=(x2-x1)**2+(y2-y1)**2; let t=((px-x1)*(x2-x1)+(py-y1)*(y2-y1))/L2; t=Math.max(0,Math.min(1,t)); if (Math.hypot(x1+t*(x2-x1)-px,y1+t*(y2-y1)-py)<6) return i; } return -1; }
-function removeNode(i) { S.nodes.splice(i,1); const fix = n => n>i?n-1:n; S.members = S.members.filter(m=>m[0]!==i&&m[1]!==i).map(m=>[fix(m[0]),fix(m[1])]); S.forces = S.forces.filter(f=>f.n!==i).map(f=>({...f,n:fix(f.n)})); S.supports = S.supports.filter(s=>s.n!==i).map(s=>({...s,n:fix(s.n)})); }
 function forceTipAt(px,py) { for (let i=0;i<S.forces.length;i++) { const f = S.forces[i], [nx,ny] = toPx(...S.nodes[f.n]), mag = Math.hypot(f.fx,f.fy)||1, L = Math.max(mag/S.arrowN*S.scale,12); if (Math.hypot(nx+f.fx/mag*L-px, ny-f.fy/mag*L-py) < 14) return i; } return -1; }
+function removeNodes(list) {                    // delete nodes (and everything attached), renumbering the rest
+  const del = new Set(list), map = []; let k = 0;
+  S.nodes.forEach((_,i) => { map[i] = del.has(i) ? -1 : k++; });
+  S.nodes = S.nodes.filter((_,i) => !del.has(i));
+  S.members = S.members.filter(m => map[m[0]]>=0 && map[m[1]]>=0).map(m => [map[m[0]], map[m[1]], ...(m.length>2?[m[2]]:[])]);
+  S.forces = S.forces.filter(f => map[f.n]>=0).map(f => ({...f, n:map[f.n]}));
+  S.supports = S.supports.filter(s => map[s.n]>=0).map(s => ({...s, n:map[s.n]}));
+  S.selN = []; S.selM = -1; S.sel = null;
+}
 cv.onmousemove = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py);
-  if (!S.drag) cv.style.cursor = (!S.mode && S.tab==='design') ? (hitNode(px,py)>=0 || forceTipAt(px,py)>=0 ? 'grab' : 'default') : 'crosshair'; else if (S.drag.k!=='pan') cv.style.cursor = 'grabbing'; $('mouseLoc').textContent = '('+fmt(snap(x,S.snapX),2)+', '+fmt(snap(y,S.snapY),2)+')';
-  if (S.drag) { const d = S.drag;
-    if (d.k==='node') { S.nodes[d.i] = [snap(x,S.snapX), snap(y,S.snapY)]; }
-    else if (d.k==='force') { const [nx,ny] = S.nodes[S.forces[d.i].n]; S.forces[d.i].fx = +((x-nx)*S.arrowN).toFixed(2); S.forces[d.i].fy = +((y-ny)*S.arrowN).toFixed(2); }
-    else if (d.k==='pan') { S.x0 = d.x0 - (px-d.px)/S.scale; S.y0 = d.y0 + (py-d.py)/S.scale; }
-    solve(); buildTables(); buildMatrix(); draw(); } };
-cv.onmouseleave = () => { $('mouseLoc').textContent = 'N/A'; };
-cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mode, ni = hitNode(px,py);
-  if (m==='pan') { S.drag = {k:'pan',px,py,x0:S.x0,y0:S.y0}; return; }
-  if (!m && S.tab==='design') { const fi = forceTipAt(px,py); if (ni>=0) S.drag = {k:'node',i:ni}; else if (fi>=0) S.drag = {k:'force',i:fi}; return; }
-  if (m==='node') { S.nodes.push([snap(x,S.snapX),snap(y,S.snapY)]); fresh(); }
-  else if (m==='member') { if (ni<0) return; if (!S.sel) S.sel = {type:'first',n:ni}; else { const a = S.sel.n; S.sel = null; if (a!==ni && !S.members.some(q=>(q[0]===a&&q[1]===ni)||(q[0]===ni&&q[1]===a))) S.members.push([a,ni]); fresh(); } draw(); }
-  else if (m==='force') { if (ni>=0) { S.forces.push({n:ni,fx:0,fy:-10}); fresh(); } }
-  else if (m==='pin'||m==='hroll'||m==='vroll') {      // on a node: make it a support; on blank space: add a new node there as a support
-    let t = ni; if (t < 0) { S.nodes.push([snap(x,S.snapX), snap(y,S.snapY)]); t = S.nodes.length - 1; }
-    S.supports = S.supports.filter(s=>s.n!==t); S.supports.push({n:t,type:m}); fresh(); }
-  else if (m==='single') { if (ni>=0) { removeNode(ni); fresh(); } else { const mi = hitMember(px,py); if (mi>=0) { S.members.splice(mi,1); fresh(); } } }
-  else if (m==='mnode') { if (ni>=0) S.drag = {k:'node',i:ni}; }
-  else if (m==='mforce') { const fi = forceTipAt(px,py); if (fi>=0) S.drag = {k:'force',i:fi}; }
+  if (!S.drag) cv.style.cursor = (!S.mode && S.tab==='design') ? (hitNode(px,py)>=0 || forceTipAt(px,py)>=0 ? 'grab' : 'default') : 'crosshair'; else if (S.drag.k!=='pan') cv.style.cursor = S.drag.k==='box' ? 'crosshair' : 'grabbing';
+  $('mouseLoc').textContent = '('+fmt(snap(x,S.snapX),2)+', '+fmt(snap(y,S.snapY),2)+')';
+  const d = S.drag; if (!d) return;
+  if (d.k==='pan') { S.x0 = d.x0 - (px-d.px)/S.scale; S.y0 = d.y0 + (py-d.py)/S.scale; draw(); return; }
+  if (d.k==='box') { d.x1 = px; d.y1 = py; draw(); return; }
+  if (d.k==='group') {
+    if (S.selN.length === 1) S.nodes[S.selN[0]] = [snap(x,S.snapX), snap(y,S.snapY)];
+    else { const dx = snap(x-d.sx,S.snapX), dy = snap(y-d.sy,S.snapY); S.selN.forEach(i => { S.nodes[i] = [d.orig[i][0]+dx, d.orig[i][1]+dy]; }); }
+  } else if (d.k==='force') { const [nx,ny] = S.nodes[S.forces[d.i].n]; S.forces[d.i].fx = +((x-nx)*S.arrowN).toFixed(2); S.forces[d.i].fy = +((y-ny)*S.arrowN).toFixed(2); }
+  solve(); buildTables(); buildMatrix(); draw();
 };
-window.onmouseup = () => { if (S.drag) { const wasPan = S.drag.k==='pan'; S.drag = null; if (wasPan) return; commit(); render(); } };
-
-/* undo / redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z) over the design: nodes, members, forces, supports */
-const H = { undo: [], redo: [], cur: null };
-const snapDesign = () => JSON.stringify({n:S.nodes, m:S.members, f:S.forces, s:S.supports});
-function commit() {
-  if (S.drag) return;                       // a drag counts as one step, committed on mouse release
-  const s = snapDesign(); if (s === H.cur) return;
-  if (H.cur !== null) { H.undo.push(H.cur); if (H.undo.length > 200) H.undo.shift(); }
-  H.cur = s; H.redo = [];
-}
-function restore(s) {
-  const d = JSON.parse(s); S.nodes = d.n; S.members = d.m; S.forces = d.f; S.supports = d.s;
-  H.cur = s; S.res = null; S.sel = null; solve(); render();
-}
-function undo() { if (!H.undo.length) return; H.redo.push(H.cur); restore(H.undo.pop()); }
-function redo() { if (!H.redo.length) return; H.undo.push(H.cur); restore(H.redo.pop()); }
-H.cur = snapDesign();
+cv.onmouseleave = () => { $('mouseLoc').textContent = 'N/A'; };
+function startGroupDrag(x,y) { const orig = {}; S.selN.forEach(i => { orig[i] = [...S.nodes[i]]; }); S.drag = {k:'group', sx:x, sy:y, orig}; }
+cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mode, ni = hitNode(px,py);
+  if (S.anim) { S.anim = null; render(); }
+  if (m==='pan') { S.drag = {k:'pan',px,py,x0:S.x0,y0:S.y0}; return; }
+  if ((!m && S.tab==='design') || m==='mnode') {                       // select / drag / box-select
+    const fi = forceTipAt(px,py);
+    if (ni >= 0) {
+      if (e.shiftKey) { S.selN = S.selN.includes(ni) ? S.selN.filter(i=>i!==ni) : [...S.selN, ni]; S.selM = -1; draw(); return; }
+      if (!S.selN.includes(ni)) { S.selN = [ni]; S.selM = -1; }
+      startGroupDrag(x,y); draw();
+    } else if (fi >= 0) { S.selN = []; S.selM = -1; S.drag = {k:'force', i:fi}; }
+    else if (m==='mnode') return;
+    else { const mi = hitMember(px,py);
+      if (mi >= 0) { S.selM = mi; S.selN = []; draw(); }
+      else { S.selN = e.shiftKey ? S.selN : []; S.selM = -1; S.drag = {k:'box', px, py, x1:px, y1:py}; draw(); } }
+    return;
+  }
+  if (m==='node') { nodeAtOrNew(x,y); fresh(); }
+  else if (m==='member') {                                           // blank space makes a node there
+    const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
+    if (!S.sel) S.sel = {n:t};
+    else { const a = S.sel.n; S.sel = null; if (a!==t && !S.members.some(q=>(q[0]===a&&q[1]===t)||(q[0]===t&&q[1]===a))) S.members.push([a,t]); }
+    fresh(); }
+  else if (m==='force') { const t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); fresh(); }
+  else if (m==='pin'||m==='hroll'||m==='vroll') {                    // on a node: make it a support; on blank space: new node there
+    const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
+    S.supports = S.supports.filter(s=>s.n!==t); S.supports.push({n:t,type:m}); fresh(); }
+  else if (m==='single') { const fi = forceTipAt(px,py);
+    if (fi >= 0) { S.forces.splice(fi,1); fresh(); }
+    else if (ni >= 0) { removeNodes([ni]); fresh(); }
+    else { const mi = hitMember(px,py); if (mi >= 0) { S.members.splice(mi,1); S.selM = -1; fresh(); } } }
+  else if (m==='dforce') { const fi = forceTipAt(px,py); if (fi >= 0) S.forces.splice(fi,1); else if (ni >= 0) S.forces = S.forces.filter(f=>f.n!==ni); else return; fresh(); }
+  else if (m==='dsup') { if (ni >= 0 && S.supports.some(s=>s.n===ni)) { S.supports = S.supports.filter(s=>s.n!==ni); fresh(); } }
+  else if (m==='dbl' || m==='sgl') { const mi = hitMember(px,py); if (mi >= 0) { S.members[mi][2] = m==='dbl' ? 1 : 0; fresh(); } }
+  else if (m==='mforce') { const fi = forceTipAt(px,py); if (fi >= 0) S.drag = {k:'force', i:fi}; }
+};
+window.onmouseup = () => {
+  const d = S.drag; if (!d) return; S.drag = null;
+  if (d.k==='pan') return;
+  if (d.k==='box') {
+    const x0 = Math.min(d.px,d.x1), x1 = Math.max(d.px,d.x1), y0 = Math.min(d.py,d.y1), y1 = Math.max(d.py,d.y1);
+    if (x1-x0 > 3 || y1-y0 > 3) { const ins = []; S.nodes.forEach((n,i) => { const [x,y] = toPx(...n); if (x>=x0 && x<=x1 && y>=y0 && y<=y1) ins.push(i); }); S.selN = [...new Set([...S.selN, ...ins])]; }
+    draw(); return;
+  }
+  commit(); render();
+};
 document.addEventListener('keydown', e => {
-  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-  const t = e.target, typing = t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['checkbox','file','button'].includes(t.type));
-  if (typing) return;                       // let text boxes keep their own undo
-  const k = e.key.toLowerCase();
-  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
-  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+  const t = e.target, typing = t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t.tagName === 'INPUT' && !['checkbox','file','button','range'].includes(t.type));
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    if (typing) return;                     // let text boxes keep their own undo
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    return;
+  }
+  if (typing) return;
+  if ((e.key === 'Delete' || e.key === 'Backspace') && S.tab==='design') {
+    if (S.selN.length) { e.preventDefault(); removeNodes(S.selN); fresh(); }
+    else if (S.selM >= 0) { e.preventDefault(); S.members.splice(S.selM,1); S.selM = -1; fresh(); }
+  } else if (e.key === 'Escape') { S.selN = []; S.selM = -1; S.sel = null; S.mode = null; S.anim = null; render(); }
 });
 
-/* dark mode toggle (remembered per browser) */
+/* ============ dark mode toggle (remembered per browser) ============ */
 function setDark(on) {
   document.documentElement.classList.toggle('dark', on);
   $('darkToggle').innerHTML = on ? '&#9728; Light mode' : '&#9790; Dark mode';
@@ -533,6 +789,9 @@ function setDark(on) {
 $('darkToggle').onclick = () => setDark(!document.documentElement.classList.contains('dark'));
 try { if (localStorage.getItem('truss-dark') === '1') setDark(true); } catch (e) {}
 
+/* ============ start: restore the last autosaved bridge, else blank ============ */
+try { const d = JSON.parse(localStorage.getItem(SAVE_KEY)); if (d && validDesign(d)) applyDesign(d); } catch (e) {}
+H.cur = snapDesign();
 solve(); render();
 </script>
 </body>
