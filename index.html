@@ -126,6 +126,17 @@ const isDbl = m => m[2] === 1;
 const mirrorNode = i => { const [x,y] = S.nodes[i]; return S.nodes.findIndex(n => Math.abs(n[0]+x) < 1e-9 && Math.abs(n[1]-y) < 1e-9); };
 const mirrorNodeOrNew = i => { const j = mirrorNode(i); if (j >= 0) return j; S.nodes.push([0-S.nodes[i][0], S.nodes[i][1]]); return S.nodes.length - 1; };
 const findMember = (a,b) => S.members.findIndex(q => (q[0]===a&&q[1]===b)||(q[0]===b&&q[1]===a));
+function addMember(a,b) {                       // a member passing through other nodes is split at each of them
+  if (a===b) return;
+  const [ax,ay] = S.nodes[a], dx = S.nodes[b][0]-ax, dy = S.nodes[b][1]-ay, L2 = dx*dx+dy*dy, mids = [];
+  S.nodes.forEach((p,i) => {
+    if (i===a || i===b) return;
+    const t = ((p[0]-ax)*dx+(p[1]-ay)*dy)/L2;
+    if (t > 1e-9 && t < 1-1e-9 && Math.hypot(ax+t*dx-p[0], ay+t*dy-p[1]) < 1e-6) mids.push({i,t});
+  });
+  const chain = [a, ...mids.sort((u,v) => u.t-v.t).map(o => o.i), b];
+  for (let k=0; k<chain.length-1; k++) if (findMember(chain[k],chain[k+1]) < 0) S.members.push([chain[k],chain[k+1]]);
+}
 function nodeAtOrNew(x,y) {               // snapped spot -> existing node there, or a new node
   const sx = snap(x,S.snapX), sy = snap(y,S.snapY);
   let i = S.nodes.findIndex(n => Math.abs(n[0]-sx) < 1e-9 && Math.abs(n[1]-sy) < 1e-9);
@@ -805,8 +816,8 @@ cv.onmousedown = e => { const [px,py] = pos(e), [x,y] = toWorld(px,py), m = S.mo
   else if (m==='member') {                                           // blank space makes a node there
     const t = ni >= 0 ? ni : nodeAtOrNew(x,y);
     if (!S.sel) S.sel = {n:t};
-    else { const a = S.sel.n; S.sel = null; if (a!==t && findMember(a,t) < 0) S.members.push([a,t]);
-      if (S.sym) { const ma = mirrorNodeOrNew(a), mt = mirrorNodeOrNew(t); if (ma!==mt && findMember(ma,mt) < 0) S.members.push([ma,mt]); } }
+    else { const a = S.sel.n; S.sel = null; addMember(a,t);
+      if (S.sym) addMember(mirrorNodeOrNew(a), mirrorNodeOrNew(t)); }
     fresh(); }
   else if (m==='force') { const first = !S.forces.length, t = ni >= 0 ? ni : nodeAtOrNew(x,y); S.forces.push({n:t,fx:0,fy:-10}); if (S.sym) { const mt = mirrorNodeOrNew(t); if (mt!==t) S.forces.push({n:mt,fx:0,fy:-10}); }
     if (first) { S.tab = 'balsa'; sub2 = null; S.mode = null; S.sel = null; }   // first load added: show the Balsa Wood results
