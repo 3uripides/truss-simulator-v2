@@ -87,7 +87,7 @@ const S = {
   nodes: [], members: [],            // members: [nodeA, nodeB, 1 if double stacked]
   forces: [], supports: [],
   lu:'cm', fu:'N', snapX:1, snapY:1, arrowN:5,
-  scale: 607/22, x0: -11, y0: 6.5,     // world coord at canvas top-left: x=x0, y=y0
+  scale: 607/22, x0: -11, y0: 275/(607/22)*0.75,     // world coord at canvas top-left: x=x0, y=y0
   show: {vec:true, mtext:true, ftext:true, ntext:true, nodeList:true, memList:true, forceList:true},
   matrix:false, tab:'design', mode:null, sel:null, res:null, drag:null,
   selN: [], selM: -1,                  // selected nodes / member (Design tab)
@@ -764,7 +764,7 @@ document.addEventListener('input', e => {
   else if (d.fx!==undefined) S.forces[d.fx].fx = parseFloat(t.value)||0;
   else if (d.fy!==undefined) S.forces[d.fy].fy = parseFloat(t.value)||0;
   else if (d.b!==undefined) { B[d.b] = t.type==='checkbox' ? t.checked : (parseFloat(t.value)||0); solve(); autosave(); refreshBalsa(); return; }
-  else if (t.id==='winW'||t.id==='winH') { cv.width = parseInt($('winW').value)||607; cv.height = parseInt($('winH').value)||275; autosave(); draw(); return; }
+  else if (t.id==='winW'||t.id==='winH') { setWidthCentered(parseInt($('winW').value)||607); setHeightAnchored(parseInt($('winH').value)||275); autosave(); draw(); return; }
   else return;
   solve(); refreshLive();
 });
@@ -784,9 +784,13 @@ function editVar(btn) {
   const cur = {lu:S.lu,fu:S.fu,W:cv.width/S.scale,H:cv.height/S.scale,snapX:S.snapX,snapY:S.snapY,arrowN:S.arrowN}[k];
   inp.value = typeof cur==='number' ? +cur.toFixed(2) : cur; if (k==='lu'||k==='fu') inp.type='text'; else inp.type='number';
   btn.replaceWith(inp); inp.focus(); inp.select();
-  const done = () => { const v = inp.value; if (k==='lu') S.lu = v||'cm'; else if (k==='fu') S.fu = v||'N'; else { const n = parseFloat(v); if (n>0) { if (k==='W') cv.width = Math.round(n*S.scale); else if (k==='H') cv.height = Math.round(n*S.scale); else S[k]=n; } } solve(); autosave(); render(); };
+  const done = () => { const v = inp.value; if (k==='lu') S.lu = v||'cm'; else if (k==='fu') S.fu = v||'N'; else { const n = parseFloat(v); if (n>0) { if (k==='W') setWidthCentered(Math.round(n*S.scale)); else if (k==='H') setHeightAnchored(Math.round(n*S.scale)); else S[k]=n; } } solve(); autosave(); render(); };
   inp.onblur = done; inp.onkeydown = ev => { if (ev.key==='Enter') inp.blur(); };
 }
+// change canvas width while keeping the world x at the canvas center fixed
+function setWidthCentered(w) { S.x0 -= (w - cv.width) / S.scale / 2; cv.width = w; }
+// change canvas height keeping the view's vertical proportions (y = 0 stays at the same fraction of the height, e.g. 25% from the bottom unless panned)
+function setHeightAnchored(h) { S.y0 *= h / cv.height; cv.height = h; }
 function zoomCmd(z) {
   const W = cv.width/S.scale, H = cv.height/S.scale, cx = S.x0+W/2, cy = S.y0-H/2, st = 1;
   if (z==='in'||z==='out') { const f = z==='in'?1.25:.8; S.scale *= f; S.x0 = cx - cv.width/S.scale/2; S.y0 = cy + cv.height/S.scale/2; }
